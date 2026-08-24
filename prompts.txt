@@ -88,4 +88,18 @@ with this trade off, is it possible to find the text anywhere in the video, yes 
 
 15. use mistral ocr instead of paddleocr, tesseract as they are very irritating to set up and use reflex for frontend. instead of streamlit and gimme the final architecturet
 
-16. 
+16. whisper from any providers like , not my own custom. Not ollama, use any vlm like nvidia's  vlm or summin. 
+https://huggingface.co/openai/whisper-large-v3 kinda
+
+17. whisper from any providers like , not my own custom. Not ollama, use any vlm like nvidia's  vlm or summin. 
+https://huggingface.co/openai/whisper-large-v3 kinda
+
+18. using langchain to access that model is it peasible or not. 
+
+19. organise all these into modular folders for better compactibility 
+
+20. remove openai as provider and choose bn groq and huggingface which one is generous with free tier and which is better. 
+
+21. FINE i just put the necessary architecture till we discussed. So shall we start now or ?
+
+22. what do you think is the best to do now. 

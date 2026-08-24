@@ -1,0 +1,38 @@
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+
+# Reflex build artifacts
+.web/
+assets/
+
+# Temporary media buffers & artifacts
+artifacts/
+temp_data/
+*.tmp
+*.mp4
+*.m4a
+*.opus
+*.mp3
+
+# Environment secrets
+.env
+.env.local
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
