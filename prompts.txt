@@ -103,3 +103,23 @@ https://huggingface.co/openai/whisper-large-v3 kinda
 21. FINE i just put the necessary architecture till we discussed. So shall we start now or ?
 
 22. what do you think is the best to do now. 
+
+23. before doing anything, lmk schema in pydantic are you doing. and how will i access nvidia models now?
+
+24. the dialouge will be different not necessarily the same, so modify accordingly. change the content dialouge to a more dynamically given one.
+
+25. Explain what this problem is and help me fix it: Cannot find module `pydantic_settings`
+  Looked in these locations:
+  Fallback search path (guessed from importing file with heuristics): ["c:\\AI_PROJECTS\\Quest1", "c:\\AI_PROJECTS\\Quest1\\src", "c:\\AI_PROJECTS\\Quest1", "c:\\AI_PROJECTS", "c:\\"]
+  Site package path queried from interpreter: 
+
+26. now how to test how far we caem so far. and explain the flow till here. 
+
+27. did not we put the correct path, why its showing errors here. 
+
+28. right now, what testing framework follows, and include the best practices here for testing. 
+
+29. fine, shall we start and get this done. 
+
+
+30. why do you even do all these stuff, just wait for my permissions and dont do these slops, undo these changes and explain all of them one by one in each and everything what you did. This is utter nonsense. I want you to engineer, not vomit ai slops. 
