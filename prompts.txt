@@ -121,5 +121,16 @@ https://huggingface.co/openai/whisper-large-v3 kinda
 
 29. fine, shall we start and get this done. 
 
+30. why do you even do all these stuff, just wait for my permissions and dont do these slops, undo these changes and explain all of them one by one in each and everything what you did.
 
-30. why do you even do all these stuff, just wait for my permissions and dont do these slops, undo these changes and explain all of them one by one in each and everything what you did. This is utter nonsense. I want you to engineer, not vomit ai slops. 
+31.fine lets continue okay. 
+
+32.This is utter nonsense. I want you to engineer, not vomit ai slops. 
+
+33. Now run the unit tests for which you generated the code from the base url checking till the end of this part. Summarize what you did and run the unit tests. 
+
+34. i have to verify them by hand, gimme the command to run. 
+
+35. what abt this and are we ready to move to the next thing. yes or not
+
+36. yes please. 
