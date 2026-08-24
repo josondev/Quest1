@@ -134,3 +134,32 @@ https://huggingface.co/openai/whisper-large-v3 kinda
 35. what abt this and are we ready to move to the next thing. yes or not
 
 36. yes please. 
+
+37. @terminal:can't the current output be gracefully handled
+
+38. what to do to extend the support to vimeo and for any errors , using an extra vlm's or something. 
+
+Target URL	Platform	Error Type	Technical Root Cause
+https://ok.ru/video/248244667877	Odnoklassniki (ok.ru)	SSL Handshake / TCP RST (WinError 10054)	Geo-blocking / Edge Firewall Drop: The Russian CDN edge (Qrator/DDoS-Guard) actively sends a TCP Reset to foreign IP addresses during the OpenSSL ClientHello handshake before HTTP communication begins. (Confirmed via native curl.exe reset).
+https://vimeo.com/76979871	Vimeo	Authentication Required (Cookie Lock)	Platform Policy Change: Vimeo's web API requires authenticated session cookies (--cookies-from-browser or user credentials) to extract stream metadata from their web client.
+http://commondatastorage.googleapis.com/.../BigBuckBunny.mp4	Google Cloud Storage	HTTP 403 Forbidden	Bucket Permissions: Google made this legacy sample bucket private/restricted, rejecting anonymous public HTTP GET requests.
+https://archive.org/details/Electra1962	Internet Archive	HTTP 404 Not Found	Invalid Identifier Slug: Electra1962 is not a registered item ID in the archive.org database. (When valid item IDs were provided, e.g. popeye_shuteye_popeye, it succeeded immediately).
+https://www.dailymotion.com/video/x8j9g1v	Dailymotion	HTTP 404 Not Found	Deleted/Expired Video: That specific video ID was removed by its uploader. (When live IDs like x7tgad0 were used, it succeeded immediately).
+
+something like this means if i put vlms means will it work. dont do anything. we will be back after a short break. 
+
+39. till now what have we done so far, just tell me and the testing whether all are working good or
+
+40. shall we start, to build step 4. go ahead. And use the official docs of mistralai always and other frameworks if we are going to plug something external. 
+
+41. till what and all the pipeline is done and what are all pending still
+
+42. the pipeline so far i want to test, from video till this point
+
+43. run the tests for the ocr and check whether its fine or not.
+
+44. can i check with a random video source
+
+45. can i check with a random video source
+
+

@@ -1,9 +1,30 @@
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 import yt_dlp
 from src.config import settings
+
+
+class IngestionError(Exception):
+    """Clean domain exception raised when stream ingestion or metadata probing fails."""
+    pass
+
+
+class SilentYTDLPLogger:
+    """Suppresses internal yt-dlp stderr noise and raw stack trace dumps."""
+    def debug(self, msg: str) -> None:
+        pass
+
+    def info(self, msg: str) -> None:
+        pass
+
+    def warning(self, msg: str) -> None:
+        pass
+
+    def error(self, msg: str) -> None:
+        pass
 
 
 @dataclass
@@ -38,6 +59,36 @@ class StreamIngestionService:
             raise ValueError(f"Invalid or unsafe URL protocol in '{url}'. Must start with http:// or https://")
         return cleaned
 
+    @staticmethod
+    def _parse_friendly_error(clean_url: str, error: Exception) -> str:
+        """Extract a clean, human-readable explanation from low-level network/SSL errors."""
+        err_msg = str(error)
+        err_lower = err_msg.lower()
+
+        # 1. SSL / Handshake / Connection Reset / Geo-blocking
+        if any(k in err_lower for k in ["ssl", "10054", "connection was reset", "connectionreset", "handshake", "certificate"]):
+            return (
+                f"Unable to connect to the video host '{clean_url}' due to network/SSL handshake failure. "
+                "The remote platform may be geo-blocked or enforcing network restrictions in your region."
+            )
+
+        # 2. HTTP 403 / Private / Forbidden
+        if "403" in err_msg or "forbidden" in err_lower or "private video" in err_lower:
+            return f"Access to video stream '{clean_url}' was denied (HTTP 403 / Private video or region lock)."
+
+        # 3. HTTP 404 / Video Removed / Not Found
+        if "404" in err_msg or "not found" in err_lower or "video unavailable" in err_lower:
+            return f"Video could not be found at '{clean_url}' (HTTP 404 / Video removed or invalid URL)."
+
+        # 4. Strip internal yt-dlp / extractor noise and boilerplate
+        clean = err_msg.splitlines()[0] if err_msg else "Unknown video stream error."
+        clean = re.sub(r"^ERROR:\s*", "", clean)
+        clean = re.sub(r"^\[.*?\]\s*", "", clean)
+        clean = clean.split("; please report")[0].strip()
+        clean = clean.split(" (caused by")[0].strip()
+
+        return f"Stream error at '{clean_url}': {clean}"
+
     def probe_metadata(self, url: str) -> VideoMetadata:
         """
         Probe remote video container to extract exact duration, nominal FPS, and dimensions
@@ -50,16 +101,18 @@ class StreamIngestionService:
             "quiet": True,
             "no_warnings": True,
             "noplaylist": True,
+            "logger": SilentYTDLPLogger(),
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 info = ydl.extract_info(clean_url, download=False)
             except Exception as e:
-                raise RuntimeError(f"Failed to probe video stream metadata via yt-dlp: {str(e)}") from e
+                friendly_msg = self._parse_friendly_error(clean_url, e)
+                raise IngestionError(friendly_msg) from None
 
         if not info:
-            raise RuntimeError(f"No stream information returned for URL: {clean_url}")
+            raise IngestionError(f"No stream information returned for URL: {clean_url}")
 
         duration = float(info.get("duration") or 0.0)
         fps = float(info.get("fps") or 30.0)  # Default fallback nominal 30 FPS if unspecified
@@ -105,16 +158,18 @@ class StreamIngestionService:
             "quiet": True,
             "no_warnings": True,
             "noplaylist": True,
+            "logger": SilentYTDLPLogger(),
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 info = ydl.extract_info(clean_url, download=True)
             except Exception as e:
-                raise RuntimeError(f"Failed to extract audio stream from {clean_url}: {str(e)}") from e
+                friendly_msg = self._parse_friendly_error(clean_url, e)
+                raise IngestionError(friendly_msg) from None
 
         if not info:
-            raise RuntimeError(f"Failed to retrieve downloaded audio metadata for {clean_url}")
+            raise IngestionError(f"Failed to retrieve downloaded audio metadata for {clean_url}")
 
         video_id = info.get("id", "audio")
         expected_path = self.temp_dir / f"{job_id}_{video_id}.mp3"
@@ -147,6 +202,7 @@ class StreamIngestionService:
             "subtitlesformat": "vtt/srt/best",
             "quiet": True,
             "no_warnings": True,
+            "logger": SilentYTDLPLogger(),
         }
 
         try:

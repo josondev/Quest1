@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
-from src.ingestion import StreamIngestionService, VideoMetadata
+from src.ingestion import StreamIngestionService, VideoMetadata, IngestionError
 
 
 class TestStreamIngestionService:
@@ -49,13 +49,13 @@ class TestStreamIngestionService:
 
     @patch("src.ingestion.yt_dlp.YoutubeDL")
     def test_probe_metadata_error_handling(self, mock_ydl_cls, tmp_path):
-        """Verify RuntimeError is raised when yt-dlp fails."""
+        """Verify clean IngestionError is raised when yt-dlp fails."""
         mock_ydl = MagicMock()
         mock_ydl_cls.return_value.__enter__.return_value = mock_ydl
         mock_ydl.extract_info.side_effect = Exception("Video unavailable")
 
         svc = StreamIngestionService(temp_dir=tmp_path)
-        with pytest.raises(RuntimeError, match="Failed to probe video stream metadata"):
+        with pytest.raises(IngestionError, match="Video could not be found"):
             svc.probe_metadata("https://www.youtube.com/watch?v=badurl")
 
     @patch("src.ingestion.yt_dlp.YoutubeDL")
