@@ -86,4 +86,6 @@
 
 with this trade off, is it possible to find the text anywhere in the video, yes or no if no, what can we improve. 
 
-15. use mistral ocr instead of paddleocr, tesseract as they are very irritating to set up and use reflex for frontend. instead of streamlit and gimme the final architecturet sparse ocr, we can just keep this vlm as fallback why or why not, defend yourself
+15. use mistral ocr instead of paddleocr, tesseract as they are very irritating to set up and use reflex for frontend. instead of streamlit and gimme the final architecturet
+
+16. 
