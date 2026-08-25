@@ -160,6 +160,10 @@ something like this means if i put vlms means will it work. dont do anything. we
 
 44. can i check with a random video source
 
-45. can i check with a random video source
+45. https://ok.ru/video/248244667877
+i am able to access this link in  my college wifi but not in home wifi, so is there any workaround for that like this video and similar kinds of links also must work. 
+
+46. fine are we done and explain what did we achieve so far. 
+ 
 
 

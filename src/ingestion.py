@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 import yt_dlp
+import cv2 # New import for local file probing
 from src.config import settings
 
 
@@ -27,6 +28,29 @@ class SilentYTDLPLogger:
         pass
 
 
+def get_yt_dlp_options(proxy_url: str = None) -> Dict[str, Any]:
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "nocheckcertificate": True,
+        "legacy_server_connect": True,
+        "http_headers": {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/122.0.0.0 Safari/537.36"
+            ),
+            "Accept": "*/*",
+        },
+        "retries": 5,
+        "logger": SilentYTDLPLogger(), # Add our custom logger
+    }
+    # Optional local proxy support (e.g. http://127.0.0.1:7890)
+    if proxy_url:
+        opts["proxy"] = proxy_url
+    return opts
+
+
 @dataclass
 class VideoMetadata:
     """Probed container and stream metadata without full video payload download."""
@@ -38,6 +62,8 @@ class VideoMetadata:
     title: str
     has_subtitles: bool
     subtitles_info: Dict[str, Any]
+    is_local: bool = False # New field
+    stream_path: str = ""  # New field
 
 
 class StreamIngestionService:
