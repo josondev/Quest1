@@ -121,6 +121,11 @@ class Settings(BaseSettings):
     api_host: str = Field(default="0.0.0.0", description="FastAPI host")
     api_port: int = Field(default=8000, description="FastAPI port")
 
+    @property
+    def artifacts_dir(self) -> Path:
+        """Alias helper for artifact storage directory compatibility."""
+        return self.artifact_storage_dir
+
     @field_validator("artifact_storage_dir", "temp_storage_dir", mode="after")
     @classmethod
     def ensure_directories_exist(cls, path_value: Path) -> Path:
@@ -129,5 +134,4 @@ class Settings(BaseSettings):
         return path_value
 
 
-# Global singleton settings instance
 settings = Settings()

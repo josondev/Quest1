@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.git/
+.gitignore
+.env
+.vscode/
+artifacts/*
+!artifacts/.gitkeep
+temp_data/*
+!temp_data/.gitkeep

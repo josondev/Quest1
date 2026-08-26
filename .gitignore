@@ -36,3 +36,6 @@ htmlcov/
 .idea/
 .DS_Store
 Thumbs.db
+test_audio/fbfc43c5-1366-464c-9149-942539841d37_audio.part
+test_audio/fbfc43c5-1366-464c-9149-942539841d37_audio.ytdl
+meta.json

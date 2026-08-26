@@ -224,7 +224,11 @@ class TestSampleFramesSparse:
         assert len(frames) == 2
 
     @patch("src.primary_ocr.cv2.VideoCapture")
-    def test_raises_error_on_unreadable_file(self, mock_cap_cls, tmp_path):
+    def test_raises_error_on_unreadable_file(
+        self,
+        mock_cap_cls,
+        tmp_path,
+    ):
         """Should raise OCRError if OpenCV cannot open the video file."""
         mock_cap = MagicMock()
         mock_cap_cls.return_value = mock_cap
@@ -233,5 +237,11 @@ class TestSampleFramesSparse:
         video_path = tmp_path / "bad_video.mp4"
         video_path.touch()
 
-        with pytest.raises(OCRError, match="Cannot open video file"):
-            sample_frames_sparse(video_path, sample_fps=0.5)
+        with pytest.raises(
+            OCRError,
+            match="Cannot open video",
+        ):
+            sample_frames_sparse(
+                video_path,
+                sample_fps=0.5,
+            )

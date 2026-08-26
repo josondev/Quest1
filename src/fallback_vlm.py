@@ -2,209 +2,215 @@
 import base64
 import json
 import logging
-import math
-import mimetypes
+import re
 from pathlib import Path
-from typing import List, Optional
-from openai import OpenAI
+from typing import List, Optional, Tuple
+
+import requests
+
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 
 from src.config import settings
-from src.models.schemas import BoundingBox, CandidateFrame, VLMDecision
+from src.models.schemas import CandidateFrame, VLMDecision
 
 logger = logging.getLogger(__name__)
 
 
 class VLMError(Exception):
-    """Domain exception raised when Tier 4 VLM arbitration fails."""
+    """Domain exception raised when Tier 4 VLM evaluation fails."""
     pass
 
 
-def encode_image_to_base64(image_path: str) -> tuple[str, str]:
-    """
-    Read a local frame image file and encode it as base64.
-    Returns (base64_string, mime_type) derived from file extension.
-    """
+def encode_image_to_base64(image_path: str) -> Tuple[str, str]:
+    """Encode local image file to base64 string and return (b64_string, mime_type)."""
     path = Path(image_path)
     if not path.exists():
-        raise VLMError(f"Candidate frame image not found at path: {image_path}")
+        raise VLMError(f"Candidate frame image not found: {image_path}")
 
-    mime_type, _ = mimetypes.guess_type(str(path))
-    if mime_type not in ("image/jpeg", "image/png", "image/webp"):
-        raise VLMError(
-            f"Unsupported or undetected image type for '{image_path}' "
-            f"(guessed: {mime_type}). Expected .jpg/.jpeg/.png/.webp."
-        )
+    ext = path.suffix.lower()
+    if ext in [".jpg", ".jpeg"]:
+        mime_type = "image/jpeg"
+    elif ext == ".png":
+        mime_type = "image/png"
+    elif ext == ".webp":
+        mime_type = "image/webp"
+    else:
+        raise VLMError(f"Unsupported or undetected image type for {image_path}")
 
     try:
-        with open(path, "rb") as image_file:
-            return base64.b64encode(image_file.read()).decode("utf-8"), mime_type
-    except Exception as e:
-        raise VLMError(f"Failed to encode frame image '{image_path}': {e}") from e
+        with open(path, "rb") as img_file:
+            encoded = base64.b64encode(img_file.read()).decode("utf-8")
+            return encoded, mime_type
+    except Exception as exc:
+        raise VLMError(f"Failed base64 encoding for image {image_path}: {exc}") from exc
 
 
 class VLMArbiterService:
     """
-    Tier 4: VLM Arbiter Service via OpenAI-compatible API.
-    Enforces bounded candidate selection: the model only selects from physically 
-    supplied candidate frame IDs. Timestamps and frame numbers are mapped by the 
-    application logic downstream upon candidate selection.
+    Tier 4 Bounded VLM Candidate Arbiter.
+    Evaluates extracted candidate frames against target dialogue using NVIDIA NIM.
+    Strictly enforces zero-hallucination candidate selection bounded to physical frames.
     """
 
-    def __init__(
-        self,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        model_name: Optional[str] = None,
-    ):
+    SYSTEM_PROMPT = """You are a strict visual frame arbiter for video dialogue localization.
+Examine the provided candidate frames and determine which frame visually displays the target dialogue phrase in its subtitles or on-screen text.
+
+CRITICAL CONSTRAINT:
+You MUST select ONLY from the supplied candidate IDs (e.g., "C1", "C2", "C3") or return "NONE".
+Do NOT invent new timestamps, frame numbers, or candidate IDs.
+
+OUTPUT FORMAT:
+Return ONLY a valid JSON object matching this schema. Do NOT include any preamble, conversational text, or narrative explanation before or after the JSON:
+{
+  "selected_candidate_id": "C1",
+  "exact_detected_text": "text visible in subtitle ROI",
+  "confidence_score": 0.95,
+  "reasoning": "brief confirmation of visual match"
+}"""
+
+    encode_image_to_base64 = staticmethod(encode_image_to_base64)
+
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, model: Optional[str] = None):
         self.api_key = api_key if api_key is not None else settings.nvidia_api_key
-        self.base_url = base_url or settings.nvidia_base_url
-        self.model_name = model_name or settings.nvidia_vlm_model
+        self.base_url = (base_url or settings.nvidia_base_url).rstrip("/")
+        self.model = model or settings.nvidia_vlm_model
 
-        self._client: Optional[OpenAI] = None
-
-    def _get_client(self) -> OpenAI:
-        if not self._client:
-            if not self.api_key:
-                raise VLMError("NVIDIA API Key is not configured. Set NVIDIA_API_KEY in .env")
-            self._client = OpenAI(
-                base_url=self.base_url,
-                api_key=self.api_key,
-            )
-        return self._client
+        if OpenAI is not None:
+            self.client = OpenAI(api_key=self.api_key or "dummy", base_url=self.base_url)
+        else:
+            self.client = None
 
     def evaluate_candidates(
-        self,
-        target_dialogue: str,
-        candidates: List[CandidateFrame],
+        self, target_dialogue: str, candidate_frames: List[CandidateFrame]
     ) -> VLMDecision:
         """
-        Send candidate frames to the VLM to verify subtitle text presence.
-        Returns a VLMDecision selecting the optimal candidate_id or 'NONE'.
+        Evaluate candidate frames against target dialogue using multimodal LLM.
+        Forces candidate selection to remain strictly bounded to input IDs.
         """
-        if not candidates:
+        if not candidate_frames:
             return VLMDecision(
                 selected_candidate_id="NONE",
+                exact_detected_text="",
                 confidence_score=0.0,
-                reasoning="No candidate frames provided for VLM evaluation.",
+                reasoning="No candidate frames provided for evaluation.",
             )
 
-        # Enforce unique candidate IDs
-        raw_ids = [cand.candidate_id for cand in candidates]
-        if len(raw_ids) != len(set(raw_ids)):
-            raise VLMError("Candidate IDs provided for VLM evaluation must be unique.")
+        if not self.api_key:
+            raise VLMError("API Key is not configured for VLM evaluation.")
 
-        valid_ids = set(raw_ids) | {"NONE"}
-        client = self._get_client()
+        candidate_ids = [c.candidate_id for c in candidate_frames]
+        if len(candidate_ids) != len(set(candidate_ids)):
+            raise VLMError("Candidate IDs provided for VLM evaluation must be unique")
 
-        system_prompt = (
-            "You are an expert video frame dialogue verifier.\n"
-            "Your task is to inspect the provided video frame images and determine which frame "
-            "visually displays the target dialogue phrase in its subtitles/on-screen text.\n\n"
-            "CRITICAL CONSTRAINTS:\n"
-            "1. Select ONLY one of the provided candidate IDs (e.g., C1, C2) or 'NONE'.\n"
-            "2. Do NOT create candidate IDs that were not explicitly provided.\n"
-            "3. Do NOT infer or output timestamps or frame numbers.\n"
-            "4. Return your response STRICTLY as a valid JSON object matching this schema:\n"
-            "{\n"
-            '  "selected_candidate_id": "C1",\n'
-            '  "exact_detected_text": "verbatim text visible in frame",\n'
-            '  "bounding_box": {"ymin": 0.75, "xmin": 0.1, "ymax": 0.95, "xmax": 0.9},\n'
-            '  "confidence_score": 0.95,\n'
-            '  "reasoning": "Clear explanation of why this frame was chosen."\n'
-            "}"
-        )
+        valid_ids = set(candidate_ids)
 
-        content_payload = [
-            {
-                "type": "text",
-                "text": f"Target Dialogue to locate: \"{target_dialogue}\"\n\nInspect these candidate frames:",
-            }
+        content_payload: List[dict] = [
+            {"type": "text", "text": f'Target Dialogue to locate: "{target_dialogue}"\nCandidates:'}
         ]
 
-        # Attach candidate frames without leaking timestamps
-        for cand in candidates:
-            b64_img, mime_type = encode_image_to_base64(cand.image_path)
+        for cand in candidate_frames:
+            b64_str, mime_type = self.encode_image_to_base64(cand.image_path)
+            b64_url = f"data:{mime_type};base64,{b64_str}"
             content_payload.append({
                 "type": "text",
-                "text": f"\nCandidate ID: {cand.candidate_id}:",
+                "text": f"\nCandidate ID: {cand.candidate_id}: (Timestamp: {cand.timestamp_seconds}s)"
             })
             content_payload.append({
                 "type": "image_url",
-                "image_url": {
-                    "url": f"data:{mime_type};base64,{b64_img}"
-                },
+                "image_url": {"url": b64_url}
             })
 
+        messages = [
+            {"role": "system", "content": self.SYSTEM_PROMPT},
+            {"role": "user", "content": content_payload},
+        ]
+
         try:
-            response = client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": content_payload},
-                ],
-                temperature=0.1,
-                max_tokens=500,
-            )
-
-            raw_response = response.choices[0].message.content.strip()
-
-            if "```json" in raw_response:
-                raw_response = raw_response.split("```json")[1].split("```")[0].strip()
-            elif "```" in raw_response:
-                raw_response = raw_response.split("```")[1].split("```")[0].strip()
-
-            try:
-                parsed = json.loads(raw_response)
-            except json.JSONDecodeError as e:
-                raise VLMError(
-                    f"VLM response was not valid JSON after fence-stripping: {e}. "
-                    f"Raw response: {raw_response[:500]}"
-                ) from e
-
-            # Enforce mandatory response fields
-            required_fields = ["selected_candidate_id", "confidence_score", "exact_detected_text", "reasoning"]
-            for field in required_fields:
-                if field not in parsed:
-                    raise VLMError(f"VLM response missing required field '{field}'.")
-
-            selected_id = str(parsed["selected_candidate_id"])
-            if selected_id not in valid_ids:
-                raise VLMError(
-                    f"VLM selected candidate_id '{selected_id}', which was not "
-                    f"among the candidates provided ({sorted(valid_ids)}). "
-                    "Refusing to propagate an out-of-set selection."
+            if self.client is not None:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=0.1,
+                    max_tokens=512,
                 )
+                raw_content = response.choices[0].message.content
+            else:
+                headers = {
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                }
+                body = {
+                    "model": self.model,
+                    "messages": messages,
+                    "temperature": 0.1,
+                    "max_tokens": 512,
+                }
+                endpoint = f"{self.base_url}/chat/completions"
+                resp = requests.post(endpoint, headers=headers, json=body, timeout=30)
+                if resp.status_code != 200:
+                    raise VLMError(f"VLM API endpoint returned status {resp.status_code}")
+                res_data = resp.json()
+                raw_content = res_data["choices"][0]["message"]["content"]
 
-            # Strict non-clamping confidence validation
-            try:
-                raw_conf = float(parsed["confidence_score"])
-            except (ValueError, TypeError) as e:
-                raise VLMError(f"VLM returned non-numeric confidence_score: {parsed['confidence_score']}") from e
-
-            if not math.isfinite(raw_conf) or not (0.0 <= raw_conf <= 1.0):
-                raise VLMError(f"VLM returned invalid confidence_score: {raw_conf}. Expected float in range [0.0, 1.0].")
-
-            # Validate bounding box coordinates if present
-            bbox_data = parsed.get("bounding_box")
-            bbox = None
-            if isinstance(bbox_data, dict):
-                try:
-                    bbox = BoundingBox(**bbox_data)
-                    if bbox.xmin > bbox.xmax or bbox.ymin > bbox.ymax:
-                        raise VLMError(f"VLM returned inverted bounding box coordinates: {bbox}")
-                except Exception as e:
-                    raise VLMError(f"VLM returned malformed bounding_box data: {e}") from e
-
-            return VLMDecision(
-                selected_candidate_id=selected_id,
-                exact_detected_text=str(parsed["exact_detected_text"]),
-                bounding_box=bbox,
-                confidence_score=round(raw_conf, 4),
-                reasoning=str(parsed["reasoning"]),
-            )
+            return self._parse_vlm_response(raw_content, valid_ids)
 
         except VLMError:
             raise
-        except Exception as e:
-            logger.error("VLM evaluation failed: %s", e)
-            raise VLMError(f"VLM decision processing failed: {e}") from e
+        except Exception as exc:
+            logger.error("VLM candidate arbitration failed: %s", exc)
+            raise VLMError(f"VLM decision processing failed: {exc}") from exc
+
+    @staticmethod
+    def _parse_vlm_response(raw_text: str, valid_ids: set) -> VLMDecision:
+        """
+        Parse raw VLM output string into VLMDecision schema.
+        Extracts embedded JSON objects via regex while enforcing schema guardrails.
+        """
+        if not raw_text or not raw_text.strip():
+            raise VLMError("VLM response was empty")
+
+        clean_text = raw_text.strip()
+        clean_text = re.sub(r"^```(?:json)?", "", clean_text, flags=re.IGNORECASE).strip()
+        clean_text = re.sub(r"```$", "", clean_text).strip()
+
+        json_match = re.search(r"\{.*\}", clean_text, re.DOTALL)
+        if not json_match:
+            raise VLMError(f"VLM response was not valid JSON: {raw_text[:100]}")
+
+        json_str = json_match.group(0)
+
+        try:
+            data = json.loads(json_str)
+        except Exception as exc:
+            raise VLMError(f"VLM response was not valid JSON: {exc}") from exc
+
+        if not isinstance(data, dict):
+            raise VLMError("VLM response was not a valid JSON object")
+
+        required_fields = ["selected_candidate_id", "exact_detected_text", "confidence_score", "reasoning"]
+        for field in required_fields:
+            if field not in data:
+                raise VLMError(f"missing required field '{field}'")
+
+        try:
+            conf_score = float(data["confidence_score"])
+        except (ValueError, TypeError):
+            raise VLMError(f"invalid confidence_score: {data.get('confidence_score')}")
+
+        if not (0.0 <= conf_score <= 1.0):
+            raise VLMError(f"invalid confidence_score: {conf_score}")
+
+        selected_id = str(data["selected_candidate_id"])
+        if selected_id != "NONE" and selected_id not in valid_ids:
+            raise VLMError(f"selected candidate ID '{selected_id}', which was not among the candidates provided")
+
+        return VLMDecision(
+            selected_candidate_id=selected_id,
+            exact_detected_text=data.get("exact_detected_text", ""),
+            bounding_box=data.get("bounding_box"),
+            confidence_score=conf_score,
+            reasoning=data.get("reasoning", ""),
+        )

@@ -1,4 +1,5 @@
 from enum import Enum
+from pathlib import Path
 from typing import List, Optional
 from pydantic import BaseModel, Field, field_validator
 
@@ -38,8 +39,8 @@ class JobRequest(BaseModel):
     @classmethod
     def validate_url_scheme(cls, v: str) -> str:
         clean_url = v.strip()
-        if not (clean_url.startswith("http://") or clean_url.startswith("https://")):
-            raise ValueError("URL must begin with http:// or https://")
+        if not (clean_url.startswith("http://") or clean_url.startswith("https://") or Path(clean_url).exists()):
+            raise ValueError("URL must begin with http:// or https:// or be an existing local path")
         return clean_url
 
     @field_validator("target_text")
@@ -121,7 +122,7 @@ class DetectionResult(BaseModel):
     status: JobStatus
     target_dialogue: str
     timestamp_seconds: Optional[float] = None
-    formatted_timestamp: Optional[str] = None  # HH:MM:SS.sss
+    formatted_timestamp: Optional[str] = None
     frame_number: Optional[int] = None
     extracted_text: Optional[str] = None
     confidence_score: Optional[float] = None

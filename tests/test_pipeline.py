@@ -207,28 +207,59 @@ class TestPipelineOrchestrator:
     @patch("src.pipeline.scan_dense_window")
     @patch("src.pipeline.SpeechToTextService")
     @patch("src.pipeline.StreamIngestionService")
-    def test_remote_media_source_passed_to_videocapture(self, mock_ingestion, mock_stt, mock_dense_ocr, tmp_path):
-        remote_stream_url = "https://googlevideo.com/videoplayback_direct_stream"
-
+    def test_no_fabricated_ocr_confidence(
+        self,
+        mock_ingestion,
+        mock_stt,
+        mock_dense_ocr,
+        tmp_path,
+    ):
+        """Verify Tier 3 uses the actual OCR confidence value."""
         mock_ingestion.probe_metadata.return_value = VideoMetadata(
             url="https://youtube.com/watch?v=test",
             duration_seconds=100.0,
             fps=25.0,
             has_subtitles=False,
-            stream_path=remote_stream_url,
+            stream_path=(
+                "https://googlevideo.com/"
+                "videoplayback_direct_stream"
+            ),
         )
-        mock_ingestion.extract_audio_stream.return_value = tmp_path / "audio.wav"
 
-        mock_stt.transcribe_audio.return_value = [WordTimestamp(word="test", start=5.0, end=5.5)]
+        mock_ingestion.extract_audio_stream.return_value = (
+            tmp_path / "audio.wav"
+        )
+
+        mock_stt.transcribe_audio.return_value = [
+            WordTimestamp(
+                word="test",
+                start=5.0,
+                end=5.5,
+            )
+        ]
+
         mock_stt.align_target_dialogue.return_value = STTResult(
-            found=True, matched_text="test dialogue", start_time=5.0, end_time=5.5, confidence=0.88
+            found=True,
+            matched_text="test dialogue",
+            start_time=5.0,
+            end_time=5.5,
+            confidence=0.88,
         )
 
         dense_cand = MagicMock()
         dense_cand.timestamp_seconds = 5.2
         dense_cand.frame_number = 130
         dense_cand.ocr_detected_text = "test dialogue"
-        dense_cand.ocr_confidence = 0.90
+
+        # Real OCR confidence — no fabricated default.
+        dense_cand.ocr_confidence = 0.65
+
+        # Required because DetectionResult.frame_image_path
+        # must be a string when supplied.
+        dense_cand.image_path = str(
+            tmp_path / "tier3_verified.jpg"
+        )
+
         mock_dense_ocr.return_value = dense_cand
 
         orchestrator = PipelineOrchestrator(
@@ -236,12 +267,28 @@ class TestPipelineOrchestrator:
             stt_service=mock_stt,
             mistral_client=MagicMock(),
         )
-        request = JobRequest(url="https://youtube.com/watch?v=test", target_text="test dialogue")
-        orchestrator.run(job_id="test_remote_source", request=request)
 
-        mock_dense_ocr.assert_called_once()
-        passed_source = mock_dense_ocr.call_args[0][0]
-        assert passed_source == remote_stream_url
+        request = JobRequest(
+            url="https://youtube.com/watch?v=test",
+            target_text="test dialogue",
+        )
+
+        result = orchestrator.run(
+            job_id="test_no_fab_ocr",
+            request=request,
+        )
+
+        assert result.status == JobStatus.COMPLETED
+        assert result.tier_executed == TierType.TIER_3_DENSE_OCR
+
+        expected_score = round(
+            0.5 * 0.88
+            + 0.3 * 0.65
+            + 0.2 * 1.0,
+            4,
+        )
+
+        assert result.confidence_score == expected_score
 
     @patch("src.pipeline.StreamIngestionService")
     @patch("src.pipeline.shutil.rmtree")

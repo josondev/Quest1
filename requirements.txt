@@ -20,10 +20,13 @@ opencv-python-headless>=4.9.0.80
 pillow>=10.2.0
 numpy>=1.26.0
 logger
+requests
+faster-whisper<=1.2.1
 
 
 # Fuzzy String Alignment
 rapidfuzz>=3.6.0
+nicegui
 
 # Subtitle Parsing (Tier 0)
 webvtt-py>=0.5.1
