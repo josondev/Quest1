@@ -1,250 +1,371 @@
-import os
+import logging
 import re
-from dataclasses import dataclass
+import tempfile
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+import cv2
 import yt_dlp
-import cv2 # New import for local file probing
-from src.config import settings
+from rapidfuzz import fuzz
+
+from src.models.schemas import SubtitleMatchResult, VideoMetadata
+
+logger = logging.getLogger(__name__)
 
 
 class IngestionError(Exception):
-    """Clean domain exception raised when stream ingestion or metadata probing fails."""
+    """Domain exception raised when stream ingestion or metadata probing fails."""
     pass
-
-
-class SilentYTDLPLogger:
-    """Suppresses internal yt-dlp stderr noise and raw stack trace dumps."""
-    def debug(self, msg: str) -> None:
-        pass
-
-    def info(self, msg: str) -> None:
-        pass
-
-    def warning(self, msg: str) -> None:
-        pass
-
-    def error(self, msg: str) -> None:
-        pass
-
-
-def get_yt_dlp_options(proxy_url: str = None) -> Dict[str, Any]:
-    opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "nocheckcertificate": True,
-        "legacy_server_connect": True,
-        "http_headers": {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/122.0.0.0 Safari/537.36"
-            ),
-            "Accept": "*/*",
-        },
-        "retries": 5,
-        "logger": SilentYTDLPLogger(), # Add our custom logger
-    }
-    # Optional local proxy support (e.g. http://127.0.0.1:7890)
-    if proxy_url:
-        opts["proxy"] = proxy_url
-    return opts
-
-
-@dataclass
-class VideoMetadata:
-    """Probed container and stream metadata without full video payload download."""
-    url: str
-    duration_seconds: float
-    fps: float
-    width: int
-    height: int
-    title: str
-    has_subtitles: bool
-    subtitles_info: Dict[str, Any]
-    is_local: bool = False # New field
-    stream_path: str = ""  # New field
 
 
 class StreamIngestionService:
     """
-    Direct Stream Ingestion and Metadata Probing Service.
-    Leverages yt-dlp to inspect container properties, fetch lightweight audio streams,
-    and inspect embedded subtitles without downloading massive video files upfront.
+    Stream Ingestion & Metadata Probing Service using yt-dlp and OpenCV.
+    Handles network URL probing, WebVTT subtitle downloading/parsing,
+    sliding multi-cue matching, local OpenCV video probing, and audio stream extraction.
     """
 
-    def __init__(self, temp_dir: Optional[Path] = None):
-        self.temp_dir = temp_dir or settings.temp_storage_dir
-        self.temp_dir.mkdir(parents=True, exist_ok=True)
-
-    @staticmethod
-    def sanitize_url(url: str) -> str:
-        """Validate URL protocol to prevent SSRF and unsafe local file paths."""
-        cleaned = url.strip()
-        if not (cleaned.startswith("http://") or cleaned.startswith("https://")):
-            raise ValueError(f"Invalid or unsafe URL protocol in '{url}'. Must start with http:// or https://")
-        return cleaned
-
-    @staticmethod
-    def _parse_friendly_error(clean_url: str, error: Exception) -> str:
-        """Extract a clean, human-readable explanation from low-level network/SSL errors."""
-        err_msg = str(error)
-        err_lower = err_msg.lower()
-
-        # 1. SSL / Handshake / Connection Reset / Geo-blocking
-        if any(k in err_lower for k in ["ssl", "10054", "connection was reset", "connectionreset", "handshake", "certificate"]):
-            return (
-                f"Unable to connect to the video host '{clean_url}' due to network/SSL handshake failure. "
-                "The remote platform may be geo-blocked or enforcing network restrictions in your region."
-            )
-
-        # 2. HTTP 403 / Private / Forbidden
-        if "403" in err_msg or "forbidden" in err_lower or "private video" in err_lower:
-            return f"Access to video stream '{clean_url}' was denied (HTTP 403 / Private video or region lock)."
-
-        # 3. HTTP 404 / Video Removed / Not Found
-        if "404" in err_msg or "not found" in err_lower or "video unavailable" in err_lower:
-            return f"Video could not be found at '{clean_url}' (HTTP 404 / Video removed or invalid URL)."
-
-        # 4. Strip internal yt-dlp / extractor noise and boilerplate
-        clean = err_msg.splitlines()[0] if err_msg else "Unknown video stream error."
-        clean = re.sub(r"^ERROR:\s*", "", clean)
-        clean = re.sub(r"^\[.*?\]\s*", "", clean)
-        clean = clean.split("; please report")[0].strip()
-        clean = clean.split(" (caused by")[0].strip()
-
-        return f"Stream error at '{clean_url}': {clean}"
-
-    def probe_metadata(self, url: str) -> VideoMetadata:
-        """
-        Probe remote video container to extract exact duration, nominal FPS, and dimensions
-        without downloading video stream bytes.
-        """
-        clean_url = self.sanitize_url(url)
-        ydl_opts = {
-            "extract_flat": False,
-            "skip_download": True,
+    def __init__(self, options: Optional[Dict[str, Any]] = None):
+        self.ydl_opts = {
             "quiet": True,
             "no_warnings": True,
-            "noplaylist": True,
-            "logger": SilentYTDLPLogger(),
+            "nocheckcertificate": True,
+            "extract_flat": False,
         }
+        if options:
+            self.ydl_opts.update(options)
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            try:
-                info = ydl.extract_info(clean_url, download=False)
-            except Exception as e:
-                friendly_msg = self._parse_friendly_error(clean_url, e)
-                raise IngestionError(friendly_msg) from None
+    @staticmethod
+    def _normalize_text(text: str) -> str:
+        """Normalize case, remove punctuation, and collapse repeated whitespace."""
+        text = re.sub(r"[^\w\s]", "", text.lower())
+        return re.sub(r"\s+", " ", text).strip()
 
-        if not info:
-            raise IngestionError(f"No stream information returned for URL: {clean_url}")
+    @staticmethod
+    def _parse_vtt_timestamp(ts_str: str) -> float:
+        """Convert VTT timestamp HH:MM:SS.mmm or MM:SS.mmm to decimal seconds."""
+        ts_str = ts_str.strip().replace(",", ".")
+        parts = ts_str.split(":")
+        if len(parts) == 3:
+            h, m, s = float(parts[0]), float(parts[1]), float(parts[2])
+            return h * 3600.0 + m * 60.0 + s
+        elif len(parts) == 2:
+            m, s = float(parts[0]), float(parts[1])
+            return m * 60.0 + s
+        return 0.0
 
-        duration = float(info.get("duration") or 0.0)
-        fps = float(info.get("fps") or 30.0)  # Default fallback nominal 30 FPS if unspecified
-        width = int(info.get("width") or 1920)
-        height = int(info.get("height") or 1080)
-        title = str(info.get("title") or "Unknown Video")
-        subtitles = info.get("subtitles") or {}
-        automatic_captions = info.get("automatic_captions") or {}
+    def _parse_vtt_text(self, vtt_text: str) -> List[Dict[str, Any]]:
+        """Parse WebVTT string content into timestamped cue dicts."""
+        cues: List[Dict[str, Any]] = []
+        blocks = re.split(r"\n\s*\n", vtt_text)
 
-        has_subtitles = bool(subtitles or automatic_captions)
-        subtitles_info = {
-            "manual": list(subtitles.keys()),
-            "automatic": list(automatic_captions.keys())
-        }
-
-        return VideoMetadata(
-            url=clean_url,
-            duration_seconds=duration,
-            fps=fps,
-            width=width,
-            height=height,
-            title=title,
-            has_subtitles=has_subtitles,
-            subtitles_info=subtitles_info,
+        timestamp_re = re.compile(
+            r"((?:\d+:)?\d+:\d+(?:[\.,]\d+)?)\s*-->\s*((?:\d+:)?\d+:\d+(?:[\.,]\d+)?)"
         )
 
-    def extract_audio_stream(self, url: str, job_id: str = "audio_stream") -> Path:
-        """
-        Extract only the lightweight audio stream (compressed MP3/M4A, ~1-2 MB per minute)
-        for acoustic STT processing, avoiding full video download.
-        """
-        clean_url = self.sanitize_url(url)
-        output_template = str(self.temp_dir / f"{job_id}_%(id)s.%(ext)s")
+        for block in blocks:
+            block = block.strip()
+            if not block or block.startswith("WEBVTT") or block.startswith("NOTE"):
+                continue
 
-        ydl_opts = {
-            "format": "bestaudio/best",
-            "outtmpl": output_template,
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "128",
-            }],
-            "quiet": True,
-            "no_warnings": True,
-            "noplaylist": True,
-            "logger": SilentYTDLPLogger(),
-        }
+            lines = block.splitlines()
+            ts_match = None
+            text_lines = []
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            for line in lines:
+                m = timestamp_re.search(line)
+                if m:
+                    ts_match = m
+                elif ts_match:
+                    clean_line = re.sub(r"<[^>]+>", "", line).strip()
+                    if clean_line:
+                        text_lines.append(clean_line)
+
+            if ts_match and text_lines:
+                start_sec = self._parse_vtt_timestamp(ts_match.group(1))
+                end_sec = self._parse_vtt_timestamp(ts_match.group(2))
+                cue_text = " ".join(text_lines)
+                cues.append({
+                    "start_seconds": start_sec,
+                    "end_seconds": end_sec,
+                    "text": cue_text,
+                })
+
+        return cues
+
+    def _parse_vtt_file(self, vtt_path: Path) -> List[Dict[str, Any]]:
+        """Parse a WebVTT file from a local file path."""
+        if not vtt_path or not Path(vtt_path).exists():
+            return []
+        try:
+            content = Path(vtt_path).read_text(encoding="utf-8", errors="ignore")
+            return self._parse_vtt_text(content)
+        except Exception as exc:
+            logger.warning("Failed reading VTT file %s: %s", vtt_path, exc)
+            return []
+
+    def _download_subtitle_file(
+        self, url: str, target_dir: Optional[Path] = None
+    ) -> Union[Tuple[Optional[Path], bool, str], Optional[Path]]:
+        """
+        Download English subtitle tracks using yt-dlp to a temporary VTT file.
+        Prioritizes manual English tracks over auto-generated captions.
+        When target_dir is supplied, the caller owns its lifecycle.
+        When target_dir is omitted, this method creates an isolated temporary directory;
+        callers must not assume the returned path is persistent.
+        """
+        clean_url = url.strip()
+        if Path(clean_url).exists():
+            return None, False, "en"
+
+        work_dir = target_dir or Path(tempfile.mkdtemp(prefix="quest1_vtt_"))
+        work_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            ydl_opts_probe = dict(self.ydl_opts)
+            ydl_opts_probe["skip_download"] = True
+            with yt_dlp.YoutubeDL(ydl_opts_probe) as ydl:
+                info = ydl.extract_info(clean_url, download=False)
+
+            if not info:
+                return None, False, "en"
+
+            subtitles = info.get("subtitles", {}) or {}
+            automatic_captions = info.get("automatic_captions", {}) or {}
+
+            has_manual_en = any(k.startswith("en") for k in subtitles.keys())
+            has_auto_en = any(k.startswith("en") for k in automatic_captions.keys())
+
+            if not has_manual_en and not has_auto_en:
+                return None, False, "en"
+
+            is_auto = not has_manual_en
+
+            ydl_opts_down = dict(self.ydl_opts)
+            ydl_opts_down.update({
+                "writesubtitles": has_manual_en,
+                "writeautomaticsub": not has_manual_en and has_auto_en,
+                "subtitleslangs": ["en.*", "en"],
+                "skip_download": True,
+                "outtmpl": str(work_dir / "sub_%(id)s"),
+            })
+
+            with yt_dlp.YoutubeDL(ydl_opts_down) as ydl:
+                ydl.download([clean_url])
+
+            vtt_files = sorted(list(work_dir.glob("*.vtt")))
+            if not vtt_files:
+                return None, False, "en"
+
+            return vtt_files[0], is_auto, "en"
+
+        except Exception as exc:
+            logger.warning("Subtitle download failed for %s: %s", clean_url, exc)
+            return None, False, "en"
+
+    def probe_metadata(self, url: str) -> VideoMetadata:
+        """Probe media container metadata and stream capabilities via OpenCV or yt-dlp."""
+        clean_url = url.strip()
+        if Path(clean_url).exists():
+            cap = cv2.VideoCapture(clean_url)
+            if not cap.isOpened():
+                cap.release()
+                raise IngestionError(f"Unable to open local video file: {clean_url}")
+
             try:
-                info = ydl.extract_info(clean_url, download=True)
-            except Exception as e:
-                friendly_msg = self._parse_friendly_error(clean_url, e)
-                raise IngestionError(friendly_msg) from None
+                fps_val = cap.get(cv2.CAP_PROP_FPS)
+                frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                fps = float(fps_val) if fps_val > 0 else 25.0
+                duration = float(frame_count / fps) if frame_count > 0 and fps > 0 else 0.0
+            except Exception as cv_err:
+                logger.error("OpenCV local probing failed for %s: %s", clean_url, cv_err)
+                raise IngestionError(f"Failed to probe local video file '{clean_url}': {cv_err}") from cv_err
+            finally:
+                cap.release()
 
-        if not info:
-            raise IngestionError(f"Failed to retrieve downloaded audio metadata for {clean_url}")
+            return VideoMetadata(
+                url=clean_url,
+                duration_seconds=round(duration, 3),
+                fps=round(fps, 3),
+                has_subtitles=False,
+                is_local=True,
+                stream_path=clean_url,
+            )
 
-        video_id = info.get("id", "audio")
-        expected_path = self.temp_dir / f"{job_id}_{video_id}.mp3"
+        try:
+            with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
+                info = ydl.extract_info(clean_url, download=False)
 
-        if expected_path.exists():
-            return expected_path
+            if not info:
+                raise IngestionError(f"Could not extract info from URL: {clean_url}")
 
-        matching_files = list(self.temp_dir.glob(f"{job_id}*.*"))
-        if matching_files:
-            return matching_files[0]
+            duration = float(info.get("duration", 0.0) or 0.0)
+            fps = float(info.get("fps", 25.0) or 25.0)
+            subtitles = info.get("subtitles", {}) or {}
+            automatic_captions = info.get("automatic_captions", {}) or {}
+            has_subs = bool(subtitles or automatic_captions)
 
-        raise FileNotFoundError(f"Extracted audio file not found at expected path: {expected_path}")
+            formats = info.get("formats", [])
+            stream_url = None
+            for fmt in formats:
+                if fmt.get("vcodec") != "none" and fmt.get("acodec") != "none" and fmt.get("url"):
+                    stream_url = fmt["url"]
+                    break
+            if not stream_url and formats:
+                stream_url = formats[0].get("url")
+
+            return VideoMetadata(
+                url=clean_url,
+                duration_seconds=duration,
+                fps=fps,
+                has_subtitles=has_subs,
+                is_local=False,
+                stream_path=stream_url or clean_url,
+            )
+        except IngestionError:
+            raise
+        except Exception as exc:
+            logger.error("Failed probing metadata for %s: %s", clean_url, exc)
+            raise IngestionError(f"Probing metadata failed for URL '{clean_url}': {exc}") from exc
 
     def probe_embedded_subtitles_match(
         self,
         url: str,
         target_phrase: str,
-        similarity_threshold: float = 85.0
-    ) -> Optional[Dict[str, Any]]:
+        similarity_threshold: float = 85.0,
+        max_gap_seconds: float = 2.0,
+    ) -> Optional[SubtitleMatchResult]:
         """
-        Tier 0 Optimization: Probes container for embedded soft subtitles (.vtt / .srt / .ass).
-        If matching dialogue cue is found, returns start/end timestamp with zero AI inference cost.
+        Probe embedded or auto-generated subtitle tracks and perform
+        sliding multi-cue matching for the target phrase.
+        Ensures temporary working directories are cleaned up immediately after parsing.
         """
-        clean_url = self.sanitize_url(url)
-        ydl_opts = {
-            "skip_download": True,
-            "writesubtitles": True,
-            "writeautomaticsub": True,
-            "subtitleslangs": ["en", "en-US", "en-GB"],
-            "subtitlesformat": "vtt/srt/best",
-            "quiet": True,
-            "no_warnings": True,
-            "logger": SilentYTDLPLogger(),
-        }
+        with tempfile.TemporaryDirectory(prefix="quest1_vtt_") as temp_dir_str:
+            temp_dir = Path(temp_dir_str)
+            sub_info = self._download_subtitle_file(url, target_dir=temp_dir)
+            if not sub_info:
+                return None
+
+            if isinstance(sub_info, tuple):
+                vtt_path, is_auto, track_lang = sub_info
+            else:
+                vtt_path, is_auto, track_lang = sub_info, False, "en"
+
+            if not vtt_path or not Path(vtt_path).exists():
+                return None
+
+            cues = self._parse_vtt_file(vtt_path)
+            if not cues:
+                return None
+
+            return self._match_phrase_in_cues(
+                target_phrase=target_phrase,
+                cues=cues,
+                similarity_threshold=similarity_threshold,
+                max_gap_seconds=max_gap_seconds,
+                track_language=track_lang,
+                is_auto_generated=is_auto,
+            )
+
+    def _match_phrase_in_cues(
+        self,
+        target_phrase: str,
+        cues: List[Dict[str, Any]],
+        similarity_threshold: float = 85.0,
+        max_gap_seconds: float = 2.0,
+        track_language: str = "en",
+        is_auto_generated: bool = False,
+    ) -> Optional[SubtitleMatchResult]:
+        """
+        Generalized sliding multi-cue matcher over continuous subtitle cues.
+        Ensures target token span matching across cue boundaries while respecting temporal gap limits.
+        """
+        clean_target = self._normalize_text(target_phrase)
+        if not clean_target or not cues:
+            return None
+
+        target_words = clean_target.split()
+        target_word_count = len(target_words)
+
+        best_result: Optional[SubtitleMatchResult] = None
+        best_score: float = 0.0
+
+        for start_idx in range(len(cues)):
+            window_parts: List[str] = []
+            window_cues: List[Dict[str, Any]] = []
+
+            for current_idx in range(start_idx, len(cues)):
+                curr_cue = cues[current_idx]
+
+                if window_cues:
+                    prev_cue = window_cues[-1]
+                    gap = curr_cue.get("start_seconds", 0.0) - prev_cue.get("end_seconds", 0.0)
+                    if gap > max_gap_seconds:
+                        break
+
+                window_cues.append(curr_cue)
+                window_parts.append(curr_cue.get("text", ""))
+
+                window_raw = " ".join(window_parts)
+                normalized_window = self._normalize_text(window_raw)
+                window_words = normalized_window.split()
+
+                if len(window_words) < target_word_count:
+                    continue
+
+                for span_start in range(len(window_words) - target_word_count + 1):
+                    span_words = window_words[span_start : span_start + target_word_count]
+                    candidate_span = " ".join(span_words)
+
+                    score = fuzz.ratio(clean_target, candidate_span)
+                    if score > best_score and score >= similarity_threshold:
+                        best_score = score
+                        best_result = SubtitleMatchResult(
+                            start_time=window_cues[0].get("start_seconds", 0.0),
+                            end_time=window_cues[-1].get("end_seconds", 0.0),
+                            matched_text=window_raw.strip(),
+                            similarity_score=round(score / 100.0, 4),
+                            track_language=track_language,
+                            is_auto_generated=is_auto_generated,
+                        )
+
+        return best_result
+
+    def extract_audio_stream(
+        self, url: str, job_id: str = "audio_stream", output_dir: Optional[Path] = None
+    ) -> Path:
+        """
+        Extract audio stream to a local file for STT processing.
+        If output_dir is provided, writes inside output_dir to enable caller cleanup.
+        """
+        clean_url = url.strip()
+        if Path(clean_url).exists():
+            return Path(clean_url)
+
+        target_dir = output_dir if output_dir else Path(tempfile.mkdtemp(prefix=f"quest1_audio_{job_id}_"))
+        target_dir.mkdir(parents=True, exist_ok=True)
+        output_path = target_dir / f"{job_id}_audio.wav"
 
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(clean_url, download=False)
-        except Exception:
-            return None
+            opts = dict(self.ydl_opts)
+            opts.update({
+                "format": "bestaudio/best",
+                "outtmpl": str(target_dir / f"{job_id}_audio.%(ext)s"),
+                "postprocessors": [{
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "wav",
+                    "preferredquality": "192",
+                }],
+            })
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                ydl.download([clean_url])
 
-        if not info:
-            return None
+            extracted = list(target_dir.glob(f"{job_id}_audio.*"))
+            if extracted:
+                return extracted[0]
 
-        subtitles = info.get("subtitles") or {}
-        auto_subs = info.get("automatic_captions") or {}
-        all_tracks = {**subtitles, **auto_subs}
-
-        if not all_tracks:
-            return None
-
-        return None
+            output_path.touch()
+            return output_path
+        except Exception as exc:
+            logger.error("Audio extraction failed for %s: %s", clean_url, exc)
+            raise IngestionError(f"Audio extraction failed for URL '{clean_url}': {exc}") from exc

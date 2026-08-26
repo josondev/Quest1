@@ -9,6 +9,7 @@ httpx>=0.27.0
 # Providers (Mistral OCR, Groq Whisper STT)
 mistralai>=1.0.0
 groq>=0.9.0
+openai>=1.0.0
 huggingface-hub>=0.22.0
 
 # Stream Ingestion & Metadata Probing
@@ -18,10 +19,14 @@ yt-dlp>=2024.3.10
 opencv-python-headless>=4.9.0.80
 pillow>=10.2.0
 numpy>=1.26.0
-pytest
+logger
+
 
 # Fuzzy String Alignment
 rapidfuzz>=3.6.0
+
+# Subtitle Parsing (Tier 0)
+webvtt-py>=0.5.1
 
 # Frontend Reactive Web UI
 reflex>=0.4.0

@@ -1,12 +1,12 @@
 import pytest
 from pydantic import ValidationError
+
 from src.config import Settings
 from src.models.schemas import (
     JobRequest,
     BoundingBox,
     WordTimestamp,
     STTResult,
-    OCRResult,
     CandidateFrame,
     VLMDecision,
     DetectionResult,
@@ -42,7 +42,7 @@ class TestSchemas:
         """Verify valid job request creation."""
         req = JobRequest(
             url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-            target_text="Never gonna give you up"
+            target_text="Never gonna give you up",
         )
         assert req.url == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
         assert req.target_text == "Never gonna give you up"
@@ -58,15 +58,22 @@ class TestSchemas:
     def test_job_request_empty_text(self):
         """Verify that empty or whitespace-only target text is rejected."""
         with pytest.raises(ValidationError):
-            JobRequest(url="https://example.com/video.mp4", target_text="   ")
+            JobRequest(
+                url="https://example.com/video.mp4",
+                target_text="   ",
+            )
 
     def test_bounding_box_validation(self):
         """Verify bounding box boundary constraints [0.0, 1.0]."""
-        bbox = BoundingBox(ymin=0.1, xmin=0.2, ymax=0.8, xmax=0.9)
+        bbox = BoundingBox(
+            ymin=0.1,
+            xmin=0.2,
+            ymax=0.8,
+            xmax=0.9,
+        )
         assert bbox.ymin == 0.1
         assert bbox.xmax == 0.9
 
-        # Out-of-bounds check
         with pytest.raises(ValidationError):
             BoundingBox(ymin=-0.1)
 
@@ -75,7 +82,12 @@ class TestSchemas:
 
     def test_word_timestamp_schema(self):
         """Verify WordTimestamp data structure."""
-        wt = WordTimestamp(word="stagnation", start=12.4, end=13.1, probability=0.98)
+        wt = WordTimestamp(
+            word="stagnation",
+            start=12.4,
+            end=13.1,
+            probability=0.98,
+        )
         assert wt.word == "stagnation"
         assert wt.start == 12.4
         assert wt.end == 13.1
@@ -91,7 +103,7 @@ class TestSchemas:
             words=[
                 WordTimestamp(word="My", start=10.5, end=10.8),
                 WordTimestamp(word="mind", start=10.8, end=11.2),
-            ]
+            ],
         )
         assert stt.found is True
         assert len(stt.words) == 2
@@ -104,7 +116,7 @@ class TestSchemas:
             frame_number=375,
             image_path="./artifacts/test_c1.jpg",
             ocr_detected_text="rebels at stagnation",
-            ocr_confidence=0.78
+            ocr_confidence=0.78,
         )
         assert candidate.candidate_id == "C1"
 
@@ -112,7 +124,7 @@ class TestSchemas:
             selected_candidate_id="C1",
             exact_detected_text="My mind rebels at stagnation",
             confidence_score=0.96,
-            reasoning="Dialogue visually legible and matches target phrase."
+            reasoning="Dialogue visually legible and matches target phrase.",
         )
         assert decision.selected_candidate_id == "C1"
 
@@ -127,11 +139,13 @@ class TestSchemas:
             frame_number=375,
             extracted_text="My mind rebels at stagnation",
             confidence_score=0.92,
-            tier_executed=TierType.TIER_1_STT_DENSE,
+            tier_executed=TierType.TIER_3_DENSE_OCR,
             frame_image_path="./artifacts/frame_375.jpg",
-            cropped_roi_path="./artifacts/roi_375.jpg"
+            cropped_roi_path="./artifacts/roi_375.jpg",
         )
+
         data = res.model_dump()
+
         assert data["job_id"] == "job_test_123"
         assert data["status"] == "completed"
-        assert data["tier_executed"] == "Tier 1: STT Acoustic Match + Dense OCR"
+        assert data["tier_executed"] == "Tier 3: Dense Onset OCR Confirmation"

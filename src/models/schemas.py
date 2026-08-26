@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Optional, List
+from typing import List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -13,22 +13,26 @@ class JobStatus(str, Enum):
 
 class TierType(str, Enum):
     TIER_0_SUBTITLE = "Tier 0: Embedded Subtitle Match"
-    TIER_1_STT_DENSE = "Tier 1: STT Acoustic Match + Dense OCR"
+    TIER_1_STT = "Tier 1: STT Acoustic Match"
     TIER_2_SPARSE_OCR = "Tier 2: Sparse Timeline OCR Match"
+    TIER_3_DENSE_OCR = "Tier 3: Dense Onset OCR Confirmation"
     TIER_4_VLM_FALLBACK = "Tier 4: VLM Arbiter Fallback"
+
+
+class VideoMetadata(BaseModel):
+    """Container for video container metadata extracted during ingestion probing."""
+    url: str = Field(..., description="Target media URL or local video path")
+    duration_seconds: float = Field(default=0.0, ge=0.0, description="Total duration in seconds")
+    fps: float = Field(default=25.0, gt=0.0, description="Frames per second")
+    has_subtitles: bool = Field(default=False, description="True if embedded subtitle tracks are available")
+    is_local: bool = Field(default=False, description="True if local file, False if remote network URL")
+    stream_path: Optional[str] = Field(default=None, description="Direct playable stream URL or local path for VideoCapture")
 
 
 class JobRequest(BaseModel):
     """Payload received from user/client to locate target dialogue."""
-    url: str = Field(
-        ...,
-        description="Target media URL (e.g. YouTube, direct MP4/stream URL)"
-    )
-    target_text: str = Field(
-        ...,
-        min_length=1,
-        description="Target dialogue phrase to locate dynamically within the video"
-    )
+    url: str = Field(..., description="Target media URL (e.g. YouTube, direct MP4/stream URL)")
+    target_text: str = Field(..., min_length=1, description="Target dialogue phrase to locate dynamically within the video")
 
     @field_validator("url")
     @classmethod
@@ -61,6 +65,16 @@ class WordTimestamp(BaseModel):
     start: float
     end: float
     probability: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class SubtitleMatchResult(BaseModel):
+    """Tier 0 result: matched embedded subtitle cue with confidence score."""
+    start_time: float = Field(..., description="Start timestamp in seconds")
+    end_time: float = Field(..., description="End timestamp in seconds")
+    matched_text: str = Field(..., description="Raw text extracted from subtitle cue")
+    similarity_score: float = Field(ge=0.0, le=1.0, description="Fuzzy match confidence (0.0-1.0)")
+    track_language: str = Field(default="en", description="Language code (e.g. en-US, en-GB)")
+    is_auto_generated: bool = Field(default=False, description="True if auto-captions, False if manual")
 
 
 class STTResult(BaseModel):
