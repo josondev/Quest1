@@ -299,6 +299,7 @@ Hello world
         assert res_path == local_audio
 
     # 19. Remote Audio Extraction Success
+    @patch("subprocess.run")
     @patch("yt_dlp.YoutubeDL")
     def test_extract_audio_stream_remote(self, mock_ydl_cls, mock_subprocess_run, tmp_path):
         mock_subprocess_run.return_value.returncode = 0

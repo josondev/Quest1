@@ -9,6 +9,7 @@ class JobStatus(str, Enum):
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
+    UNCERTAIN = "uncertain"
     AMBIGUOUS = "ambiguous"
 
 
@@ -32,12 +33,15 @@ class VideoMetadata(BaseModel):
 
 class JobRequest(BaseModel):
     """Payload received from user/client to locate target dialogue."""
-    url: str = Field(..., description="Target media URL (e.g. YouTube, direct MP4/stream URL)")
+    url: Optional[str] = Field(default=None, description="Target media URL")
+    local_file_path: Optional[str] = Field(default=None, description="Target local video path")
     target_text: str = Field(..., min_length=1, description="Target dialogue phrase to locate dynamically within the video")
 
     @field_validator("url")
     @classmethod
-    def validate_url_scheme(cls, v: str) -> str:
+    def validate_url_scheme(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
         clean_url = v.strip()
         if not (clean_url.startswith("http://") or clean_url.startswith("https://") or Path(clean_url).exists()):
             raise ValueError("URL must begin with http:// or https:// or be an existing local path")
@@ -80,7 +84,7 @@ class SubtitleMatchResult(BaseModel):
 
 class STTResult(BaseModel):
     """Result returned by Tier 1 STT search."""
-    found: bool
+    found: bool = False
     matched_text: Optional[str] = None
     start_time: Optional[float] = None
     end_time: Optional[float] = None
@@ -101,8 +105,8 @@ class CandidateFrame(BaseModel):
     """Frame representation passed to Tier 4 VLM Arbiter."""
     candidate_id: str = Field(..., description="Unique identifier (e.g. C1, C2)")
     timestamp_seconds: float
-    frame_number: int
     image_path: str
+    frame_number: Optional[int] = None
     ocr_detected_text: Optional[str] = None
     ocr_confidence: Optional[float] = None
 
@@ -113,7 +117,26 @@ class VLMDecision(BaseModel):
     exact_detected_text: str = Field(default="", description="Verbatim dialogue visible in frame")
     bounding_box: Optional[BoundingBox] = None
     confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
-    reasoning: str = Field(default="")
+    reasoning: Optional[str] = Field(default="")
+
+
+class JobStatusResponse(BaseModel):
+    """Status payload returned for active or completed jobs."""
+    job_id: str
+    status: JobStatus
+    target_dialogue: Optional[str] = None
+    formatted_timestamp: Optional[str] = None
+    timestamp_seconds: Optional[float] = None
+    frame_number: Optional[int] = None
+    confidence_score: Optional[float] = None
+    tier_executed: Optional[str] = None
+    extracted_text: Optional[str] = None
+    frame_image_path: Optional[str] = None
+    error_message: Optional[str] = None
+
+
+# Compatibility Aliases
+JobResponse = JobStatusResponse
 
 
 class DetectionResult(BaseModel):
