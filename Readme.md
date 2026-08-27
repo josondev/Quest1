@@ -1,354 +1,814 @@
 # Quest1 — Dynamic Dialogue Detection Engine
 
-An end-to-end media analysis system that locates target spoken or visual dialogue within local video files and remote streaming URLs.
+Quest1 is an end-to-end AI-powered media analysis system designed to locate target spoken or visual dialogue occurrences inside video content.
 
-Quest1 uses a progressive five-tier fallback pipeline to balance processing speed, computational cost, and detection accuracy. Instead of depending on a single modality, it combines subtitle matching, speech recognition, OCR, and Vision-Language Model verification to locate and validate dialogue occurrences.
+Given a video source and a target dialogue, Quest1 analyzes the media using a progressive five-tier detection pipeline to determine:
 
----
+- Where the dialogue occurs
+- Whether it appears through speech or visual text
+- Candidate frame locations
+- Confidence scores
+- Detection evidence from multiple modalities
 
-## Overview
-
-Given a video source and a target dialogue, Quest1 attempts to determine where the dialogue occurs and, when possible, identify the corresponding visual frame.
-
-The system can work with:
+The system supports:
 
 - Local video files
 - Remote video URLs
 - CDN-hosted streams
 - Adaptive streaming sources
-- Standard MP4 sources
+- Standard MP4 media
 
-The core processing strategy is progressive — it starts with the cheapest available source of evidence and escalates only when necessary:
+Instead of relying on a single detection method, Quest1 combines subtitle analysis, speech recognition, OCR-based visual search, and Vision-Language Model verification to provide reliable dialogue localization.
 
-```
-Video Source
-     |
-     v
-Media Ingestion
-     |
-     v
-Detection Pipeline
-     |
-     +-- Subtitles (Tier 0)
-     +-- Audio      (Tier 1)
-     +-- Visual      (Tier 2 -> Tier 3 -> Tier 4)
-     |
-     v
-Detection / Uncertain
+---
+
+# Overview
+
+Traditional video search systems often depend on a single modality:
+
+- Speech recognition only
+- Subtitle matching only
+- OCR only
+
+However, real-world media introduces several challenges:
+
+- Videos may not contain subtitles
+- Dialogue may be spoken but never appear visually
+- Streaming sources may block automated access
+- Large media files may exceed API payload limits
+
+Quest1 addresses these challenges using a progressive fallback architecture.
+
+```text
+                         Video Source
+
+                              |
+                              v
+
+                    Media Ingestion Layer
+
+                              |
+                              v
+
+                   Detection Pipeline
+
+                              |
+        ------------------------------------------------
+        |              |              |                |
+        v              v              v                v
+
+   Subtitles        Speech          OCR             VLM
+   Matching          STT          Search        Validation
+
+                              |
+                              v
+
+             Detection Result / Uncertain Result
 ```
 
 ---
 
-## Key Features
+# Core Features
 
-### Five-Tier Detection Pipeline
+## Five-Tier Detection Pipeline
 
-```
+Quest1 dynamically increases computational complexity only when required.
+
+```text
 Fast + Low Compute
+
         |
         v
-Tier 0  -> Embedded Subtitle Matching
+
+Tier 0
+Embedded Subtitle Matching
+
         |
         v
-Tier 1  -> Audio Speech-to-Text Alignment
+
+Tier 1
+Speech-to-Text Alignment
+
         |
         v
-Tier 2  -> Sparse OCR Search
+
+Tier 2
+Sparse OCR Timeline Search
+
         |
         v
-Tier 3  -> Dense OCR Confirmation
+
+Tier 3
+Dense OCR Frame Confirmation
+
         |
         v
-Tier 4  -> Vision-Language Model Arbitration
+
+Tier 4
+Vision-Language Model Arbitration
+
         |
         v
-Reliable Detection / Uncertain Result
+
+Validated Detection Result
 ```
 
-This design allows the system to avoid expensive visual processing when subtitles or audio are sufficient to localize the target.
+This architecture allows inexpensive methods to resolve simple cases while reserving heavier AI processing for difficult scenarios.
 
 ---
 
-## Detection Pipeline
+# Detection Pipeline Details
 
-The main orchestration logic is implemented in `src/pipeline.py`.
-
-**Tier 0 — Embedded Subtitle Matching**
-Checks available subtitle/VTT data and attempts to locate the target using sequence similarity, providing a fast initial localization without speech recognition or visual processing.
-
-**Tier 1 — Audio Speech-to-Text**
-If subtitle-based localization is unavailable or insufficient, Quest1 extracts audio and uses local `faster-whisper` speech recognition with word-level timestamp alignment to find where the target dialogue is spoken.
-
-**Tier 2 — Sparse OCR**
-If the target still can't be reliably localized, frames are sampled across the video timeline and OCR searches for the target text — useful for text that appears visually but isn't spoken (title cards, signs, posters, overlays).
-
-**Tier 3 — Dense OCR Confirmation**
-Once a candidate region is identified, Quest1 performs concentrated OCR processing around that window to refine the detection and pinpoint the visual occurrence more precisely.
-
-**Tier 4 — Vision-Language Model Arbitration**
-The final tier evaluates multiple candidate frame windows (C1–C7) around a detected timestamp using a Vision-Language Model, weighing text visibility, visual context, spatial context, and candidate-frame consistency. This provides an additional verification layer when OCR alone isn't sufficient.
-
----
-
-## Media Ingestion
-
-Location: `src/ingestion.py`
-
-This layer is responsible for probing media sources, extracting streams, handling remote URLs, and preparing audio/video data for downstream processing.
-
-**CDN and Adaptive Stream Parsing** — Some streaming URLs don't follow conventional patterns (no `.m3u8` or `.mpd` extension). Quest1 detects these non-standard cases and can route extraction through a full MP4 download/cache path when required.
-
-**Header Signature Injection** — Some CDN and streaming sources require browser-like request headers. Quest1 supports injecting headers such as `User-Agent` and `Referer` into FFmpeg and `yt-dlp` operations for sources with hotlink protection.
-
-**Audio Codec Verification** — Before speech recognition, Quest1 verifies a usable audio stream exists and filters out video-only sources. The generated speech-recognition input is 16 kHz, mono, PCM WAV.
-
-**Windows OpenCV Stream Handling** — Remote streams can behave unreliably with `cv2.VideoCapture(...)` on Windows. Quest1 avoids passing remote HTTP/HTTPS streams directly to OpenCV and instead routes remote frame extraction through FFmpeg seeking, avoiding `CAP_IMAGES` runtime errors.
-
-**Local File Re-routing** — When a remote stream can't be processed directly and a download fallback triggers, Quest1 updates the active video source to the locally cached MP4 so all downstream stages operate against the same local file.
-
-**OK.ru and Remote CDN Handling** — Remote-source failures (ISP restrictions, campus-network restrictions, connection failures, required headers, format differences) are distinguished from detection failures — a network/access failure does not mean the dialogue wasn't found. When a remote source can't be reached reliably, the practical fallback is to obtain the video locally and run Quest1 against the local file.
-
----
-
-## Offline Speech Recognition
-
-Location: `src/primary_stt.py`
-
-Quest1 integrates local `faster-whisper` speech recognition, using available CPU/GPU resources and Hugging Face model weights. This avoids depending on a remote speech-recognition API, external rate limits, cloud payload limitations, and reduces reliance on network availability during inference.
-
-The implementation also contains sliding-window word-alignment logic to prevent timestamp index drift when aligning recognized words with candidate dialogue windows.
-
----
-
-## Vision-Language Arbitration Service
-
-Location: `src/fallback_vlm.py`
-
-Coordinates the Tier 4 multi-candidate VLM arbitration described above.
-
----
-
-## Project Structure
+The main orchestration logic is implemented in:
 
 ```
+src/pipeline.py
+```
+
+---
+
+## Tier 0 — Embedded Subtitle Matching
+
+The pipeline first checks available subtitle sources.
+
+Supported sources:
+
+- Embedded subtitle tracks
+- VTT subtitle files
+
+The system performs sequence similarity matching against the target dialogue.
+
+Advantages:
+
+- Fast execution
+- Low computational cost
+- Accurate localization when subtitles exist
+
+---
+
+## Tier 1 — Speech Recognition Alignment
+
+When subtitle information is unavailable, Quest1 uses speech recognition.
+
+The system:
+
+- Extracts audio from the video
+- Processes speech content
+- Generates timestamps
+- Aligns the target dialogue
+
+The speech pipeline supports:
+
+- Chunk-based audio processing
+- Timestamp reconstruction
+- Backoff handling for large media
+
+This allows processing of longer media files while respecting inference constraints.
+
+---
+
+## Tier 2 — Sparse OCR Search
+
+If speech-based localization is unavailable:
+
+Quest1 performs visual timeline searching.
+
+The system:
+
+- Samples frames across the video timeline
+- Extracts visible text
+- Compares OCR output with the target dialogue
+
+Useful for:
+
+- Title cards
+- Signs
+- Posters
+- Hardcoded subtitles
+- Visual-only dialogue
+
+---
+
+## Tier 3 — Dense OCR Confirmation
+
+After detecting a candidate region:
+
+Quest1 performs focused OCR analysis around the identified window.
+
+This improves:
+
+- Frame selection accuracy
+- Timestamp precision
+- Visual confirmation
+
+The goal is to identify the strongest matching frame.
+
+---
+
+## Tier 4 — Vision-Language Model Arbitration
+
+When OCR confidence is insufficient:
+
+Quest1 extracts multiple candidate frame windows.
+
+The Vision-Language Model evaluates candidates using:
+
+- Text visibility
+- Spatial context
+- Visual consistency
+
+This provides additional validation when OCR alone cannot confidently determine the correct frame.
+
+---
+
+# Media Ingestion and Stream Processing
+
+Implementation:
+
+```
+src/ingestion.py
+```
+
+The ingestion layer prepares media sources before detection.
+
+---
+
+## CDN and Adaptive Stream Handling
+
+Quest1 supports:
+
+- Remote streaming URLs
+- CDN-hosted media
+- Tokenized stream URLs
+- Standard video files
+
+When direct stream extraction is unavailable, the system can route processing through cached media extraction.
+
+---
+
+## Header Injection
+
+For protected remote streams, Quest1 supports request headers such as:
+
+- User-Agent
+- Referer
+
+This improves compatibility with restricted media sources.
+
+---
+
+## Audio Validation
+
+Before speech processing:
+
+Quest1 validates:
+
+- Available audio streams
+- Compatible codec formats
+
+Audio is converted into:
+
+```
+16kHz
+Mono
+PCM WAV
+```
+
+for speech recognition compatibility.
+
+---
+
+## Windows OpenCV Protection
+
+Direct OpenCV remote stream access can fail on Windows environments.
+
+Quest1 avoids this by:
+
+- Using FFmpeg seeking for remote frame extraction
+- Using OpenCV primarily for local processing
+
+This improves reliability during frame extraction.
+
+---
+
+# Handling Large Media and API Constraints
+
+Large media files introduce several challenges:
+
+- Upload limitations
+- Network interruptions
+- Processing failures
+
+Quest1 handles these through:
+
+- Audio chunk extraction
+- Sequential processing
+- Timestamp offset reconstruction
+- Controlled model requests
+
+This allows large media processing without requiring the entire file to be processed as a single request.
+
+---
+
+# OK.ru and Remote Stream Handling
+
+Some remote platforms, including OK.ru, may fail due to:
+
+- ISP restrictions
+- Campus network policies
+- CDN protection
+- Remote access limitations
+
+In such cases, the failure occurs before the detection pipeline begins.
+
+Recommended solutions:
+
+1. Verify the URL accessibility.
+2. Try another network connection.
+3. Download the media locally.
+4. Process the local file instead.
+
+Quest1 treats this as a source accessibility issue rather than a detection failure.
+
+---
+
+# Project Structure
+
+```text
 Quest1/
-├── artifacts/               # Generated job outputs, JSON metadata, and persistent frame images
+
+├── artifacts/
+│   └── Generated job outputs, JSON metadata, persistent frames
+
 ├── src/
-│   ├── app.py                # FastAPI REST endpoints and background task routing
-│   ├── config.py              # System and environment configuration
-│   ├── fallback_vlm.py         # Vision-Language Model candidate arbitration service
-│   ├── ingestion.py            # Stream probing, audio extraction, and FFmpeg wrappers
-│   ├── pipeline.py             # Five-tier PipelineOrchestrator implementation
-│   ├── primary_ocr.py          # Sparse timeline and dense-window OCR scanners
-│   ├── primary_stt.py          # Local faster-whisper STT service and alignment logic
-│   └── models/
-│       └── schemas.py           # Pydantic domain models
-├── tests/                    # Test suite
-├── frontend.py               # NiceGUI dashboard, calls into the FastAPI backend
+│
+│   ├── models/
+│   │   └── schemas.py
+│   │       └── Pydantic domain models
+│
+│   ├── app.py
+│   │   └── FastAPI REST endpoints and background task routing
+│
+│   ├── config.py
+│   │   └── System and environment configuration
+│
+│   ├── fallback_vlm.py
+│   │   └── VLM candidate arbitration service
+│
+│   ├── ingestion.py
+│   │   └── Stream probing, audio extraction and FFmpeg wrappers
+│
+│   ├── pipeline.py
+│   │   └── Five-tier PipelineOrchestrator implementation
+│
+│   ├── primary_ocr.py
+│   │   └── Sparse timeline and dense-window OCR scanners
+│
+│   └── primary_stt.py
+│       └── Speech-to-Text service with chunking and alignment
+│
+├── temp_data/
+│   └── Temporary audio chunks and raw frames
+│
+├── test_audio/
+│   └── Validation media
+│
+├── tests/
+│
+│   ├── test_app.py
+│   │   └── API endpoints, async jobs and frame serving
+│
+│   ├── test_config_and_schemas.py
+│   │   └── Configuration and Pydantic validation
+│
+│   ├── test_fallback_vlm.py
+│   │   └── VLM arbitration testing
+│
+│   ├── test_ingestion.py
+│   │   └── Stream probing and FFmpeg extraction
+│
+│   ├── test_pipeline.py
+│   │   └── Tier 0-4 pipeline orchestration
+│
+│   ├── test_primary_ocr.py
+│   │   └── OCR processing validation
+│
+│   └── test_primary_stt.py
+│       └── Audio chunking and alignment
+│
 ├── Dockerfile
 ├── docker-compose.yml
+├── frontend.py
+│   └── NiceGUI asynchronous dashboard
+│
 ├── architecture.md
+├── prompts.txt
+├── meta.json
 ├── pytest.ini
-├── .env.example
-└── requirements.txt
+├── requirements.txt
+└── Readme.md
 ```
 
 ---
 
-## Setup
+# Setup and Installation
 
-### Prerequisites
+## Prerequisites
 
-- Python 3.10 or later
+Before running Quest1, install:
+
+- Python 3.10+
 - FFmpeg
 - Git
-- pip
 
-Verify:
+## Installing FFmpeg
 
-```bash
-python --version
-ffmpeg -version
-```
+### Windows
 
-### Installing FFmpeg
-
-**Windows** (via winget):
 ```bash
 winget install --id Gyan.FFmpeg
 ```
 
-**Ubuntu / Debian**:
+### Ubuntu / Debian
+
 ```bash
 sudo apt update
 sudo apt install ffmpeg
 ```
 
-**macOS** (via Homebrew):
+### macOS
+
 ```bash
 brew install ffmpeg
 ```
 
-### Installing Quest1
-
-**1. Clone the repository**
+Verify installation:
 
 ```bash
-git clone https://github.com/josondev/Quest1.git
-cd Quest1
+ffmpeg -version
 ```
-
-**2. Create a virtual environment**
-
-Windows:
-```bash
-python -m venv venv
-venv\Scripts\activate
-```
-
-Linux / macOS:
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
-**3. Install dependencies**
-
-```bash
-pip install -r requirements.txt
-pip install faster-whisper nicegui
-```
-
-(If `faster-whisper` and `nicegui` are already pinned in `requirements.txt`, the second command isn't necessary.)
-
-**4. Configure environment variables**
-
-Copy `.env.example` to `.env` and fill in the values your setup needs (e.g. API keys for the VLM provider) before starting the backend.
 
 ---
 
-## Running Quest1
+# Installation
 
-### 1. Start the backend
+## 1. Clone Repository
+
+```bash
+git clone https://github.com/josondev/Quest1.git
+
+cd Quest1
+```
+
+---
+
+## 2. Create Virtual Environment
+
+### Windows
+
+```bash
+python -m venv venv
+
+venv\Scripts\activate
+```
+
+### Linux / macOS
+
+```bash
+python3 -m venv venv
+
+source venv/bin/activate
+```
+
+---
+
+## 3. Install Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+## 4. Environment Configuration
+
+Create your environment file:
+
+```bash
+cp .env.example .env
+```
+
+Configure required API keys and runtime settings inside `.env`.
+
+Example:
+
+```env
+MODEL_PROVIDER_API_KEY=<your_key>
+```
+
+---
+
+# Running Quest1
+
+## Start Backend API
+
+Launch the FastAPI server:
 
 ```bash
 uvicorn src.app:app --reload --port 8000
 ```
 
-The API will be available at `http://127.0.0.1:8000`.
+The backend will be available at:
 
-### 2. Start the dashboard
+```
+http://127.0.0.1:8000
+```
 
-In a separate terminal:
+---
+
+## Start Frontend Dashboard
+
+Open another terminal:
 
 ```bash
 python frontend.py
 ```
 
-Open `http://127.0.0.1:8080` to submit detection jobs (by URL or local file), watch live job status, and view candidate/detected frames as they're produced.
+The NiceGUI dashboard will be available at:
 
-### Running with Docker
+```
+http://127.0.0.1:8080
+```
 
-A `Dockerfile` and `docker-compose.yml` are included for containerized runs:
+The dashboard allows:
+
+- Submitting dialogue detection jobs
+- Monitoring job status
+- Tracking pipeline progress
+- Viewing extracted frames
+
+---
+
+# Docker Execution
+
+Quest1 includes Docker support.
+
+Build and run:
 
 ```bash
 docker compose up --build
 ```
 
-Check `docker-compose.yml` for the exact ports and service configuration before relying on this path.
+Docker configuration files:
 
-### Running detection directly against the API
+```
+Dockerfile
+docker-compose.yml
+```
 
-If you want to submit a job without the dashboard, hit the FastAPI backend directly, e.g.:
+---
+
+# API Usage
+
+Quest1 exposes FastAPI endpoints for programmatic access.
+
+## Create Detection Job
+
+Endpoint:
+
+```
+POST /api/v1/jobs
+```
+
+Example:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/jobs \
-  -H "Content-Type: application/json" \
-  -d '{"video_url": "VIDEO_URL", "text": "TARGET_DIALOGUE"}'
+-H "Content-Type: application/json" \
+-d '{
+    "video_url": "YOUR_VIDEO_URL",
+    "target_text": "YOUR_DIALOGUE"
+}'
 ```
 
-Then poll job status at `GET /api/v1/jobs/{job_id}`. Check `src/app.py` for the exact request/response schema, since field names may differ from the example above.
+Response:
 
-Using a local file is also the recommended fallback when a remote source such as OK.ru can't be reached from the current network — download it separately and point Quest1 at the local path instead of the URL.
-
----
-
-## Output Artifacts
-
-Quest1 stores generated job artifacts under `artifacts/`, which can include:
-
-```
-artifacts/
-├── result.json
-├── candidate frames
-├── detected frames
-└── metadata
+```json
+{
+    "job_id": "example-id",
+    "status": "processing",
+    "target_dialogue": "YOUR_DIALOGUE"
+}
 ```
 
-Result data can include the detection timestamp, confidence score, pipeline tier used, extracted text, frame information, and candidate information. The exact artifact structure is determined by the current implementation.
-
 ---
 
-## Spoken Dialogue vs. Visual Dialogue
+## Check Job Status
 
-A key design consideration: spoken dialogue does not necessarily appear visually.
+Endpoint:
 
 ```
-Audio -> Speech Recognition -> Target Dialogue Located -> OCR Verification -> No Matching Text
+GET /api/v1/jobs/{job_id}
 ```
 
-Speech recognition can successfully locate dialogue while OCR finds no corresponding on-screen text. This happens when the dialogue is only spoken, there are no subtitles, there's no burned-in text, or the line simply isn't rendered visually. An audio timestamp should therefore not automatically be treated as proof of a visual frame — Quest1 keeps localization and visual confirmation as separate concepts.
+Returns:
+
+- Current processing status
+- Detection metadata
+- Confidence information
+- Frame availability
 
 ---
 
-## Design Philosophy
+## Retrieve Detection Frame
 
-**Progressive Computation** — Start with inexpensive evidence (subtitles, then speech) and escalate to sparse OCR, dense OCR, and VLM verification only when required, avoiding expensive visual processing when an earlier stage already provides a suitable candidate.
+Endpoint:
 
-**Evidence-Based Detection** — Quest1 distinguishes between "Detected" and "Uncertain." A speech-recognition timestamp alone isn't treated as a confirmed visual occurrence, and an OCR match is considered in its surrounding visual context rather than accepting a single frame blindly.
+```
+GET /api/v1/jobs/{job_id}/frame
+```
 
-**Separation of Media Access and Detection** — Remote media retrieval is treated as a separate problem from dialogue detection, making it possible to distinguish "the video couldn't be accessed" from "the video was processed but the target couldn't be confirmed."
+Returns:
 
----
-
-## Technology Stack
-
-| Component | Technology |
-|---|---|
-| Backend API | FastAPI |
-| Speech Recognition | faster-whisper |
-| Media Processing | FFmpeg |
-| Media Extraction | yt-dlp |
-| OCR Processing | OpenCV + OCR |
-| Data Validation | Pydantic |
-| Visual Verification | Vision-Language Model |
-| Frontend | NiceGUI |
-| Containerization | Docker / Docker Compose |
-| Language | Python |
+The detected frame image if available.
 
 ---
 
-## Limitations
+# Screenshots
 
-- **Remote sources may be inaccessible** — Quest1 can't process a remote source unreachable from the current network or environment (e.g. OK.ru, protected CDN streams). Downloading the video separately and using local-file mode is the fallback.
-- **Spoken dialogue may have no visual representation** — speech recognition can locate a line that OCR can never confirm visually, because it simply never appears on screen.
-- **OCR depends on visual quality** — small text, low contrast, stylized fonts, motion, compression, complex backgrounds, and partial occlusion can all degrade OCR performance.
-- **Higher tiers require more computation** — dense OCR and VLM verification are more expensive than subtitle matching or speech recognition; the tiered architecture exists to avoid these stages whenever earlier evidence is sufficient.
-- **Remote stream formats vary** — URL structure, available tracks, required headers, adaptive-stream formats, and access restrictions differ by provider. Quest1 includes fallback handling for these cases, but ultimate compatibility depends on the source.
+## Backend API
 
----
+The FastAPI backend handles job creation, background execution, status tracking, and frame retrieval.
 
-## Roadmap
-
-- [ ] Add live job-status polling improvements
-- [ ] Add pipeline-stage visualization
-- [ ] Add candidate-frame visualization
-- [ ] Improve VLM candidate arbitration
-- [ ] Expand handling of difficult CDN stream formats
-- [ ] Improve batch media processing
+![Quest1 Backend](assets/backend.png)
 
 ---
 
-## Repository
+## Frontend Dashboard
 
-https://github.com/josondev/Quest1
+The NiceGUI interface provides a user-friendly dashboard for submitting detection tasks and monitoring results.
+
+![Quest1 Frontend](assets/frontend.png)
+
+---
+
+## Detection Output
+
+Quest1 produces the final visual evidence frame corresponding to the detected dialogue.
+
+![Quest1 Detection Output](assets/the%20required%20output.jpg)
+
+---
+
+# Technology Stack
+
+| Component          | Technology                 |
+| ------------------ | --------------------------- |
+| Backend API        | FastAPI                    |
+| Speech Recognition | Groq Whisper / HuggingFace |
+| Media Extraction   | yt-dlp / FFmpeg            |
+| OCR Processing     | OpenCV / RapidFuzz         |
+| Arbitration        | Llama 3.2 Vision           |
+| Data Validation    | Pydantic                   |
+| Frontend           | NiceGUI                    |
+| Test Suite         | Pytest                     |
+| Containerization   | Docker / Docker Compose    |
+
+---
+
+# Testing
+
+Quest1 includes automated tests covering:
+
+- API functionality
+- Configuration validation
+- Media ingestion
+- Pipeline orchestration
+- OCR processing
+- Speech recognition handling
+- VLM arbitration
+
+Run tests:
+
+```bash
+pytest
+```
+
+---
+
+# Design Philosophy
+
+## Production-Oriented Reliability
+
+Real-world media processing introduces unpredictable failures:
+
+- Large files
+- Network interruptions
+- Restricted CDNs
+- Model limitations
+- API constraints
+
+Quest1 is designed around graceful handling of these failures through:
+
+- Progressive fallback processing
+- Media caching
+- Chunked processing
+- Validation between stages
+
+---
+
+## Progressive Computation
+
+The system avoids unnecessary expensive processing.
+
+The pipeline follows:
+
+```
+Cheap Evidence
+      |
+      v
+More Expensive Validation
+      |
+      v
+High Confidence Result
+```
+
+Subtitles and speech recognition are preferred before expensive OCR and Vision-Language Model processing.
+
+---
+
+## Multi-Modal Verification
+
+Quest1 separates:
+
+- Spoken dialogue detection
+- Visual text confirmation
+
+A spoken sentence does not automatically mean the sentence appears on screen.
+
+The system maintains this distinction to avoid producing incorrect visual results.
+
+---
+
+# Current Limitations
+
+## Visual Confirmation Requires Visible Text
+
+A dialogue can be correctly recognized through speech but may never appear visually.
+
+In such cases:
+
+- Speech recognition may locate the timestamp
+- OCR cannot confirm a frame
+- The system reports the result as uncertain
+
+This prevents incorrect frame reporting.
+
+---
+
+## Remote Source Availability
+
+Some streaming platforms may block automated access.
+
+Examples:
+
+- ISP restrictions
+- Authentication requirements
+- CDN policies
+
+Recommended workaround:
+
+- Use an accessible source URL
+- Download the file locally
+- Process the local video file
+
+---
+
+## OCR Accuracy
+
+OCR performance depends on:
+
+- Text size
+- Video quality
+- Font style
+- Background complexity
+
+Small or stylized text may require additional preprocessing.
+
+---
+
+# Future Improvements
+
+Potential improvements include:
+
+- More advanced OCR preprocessing
+- Improved stream source compatibility
+- Distributed processing for large media
+- More frontend visualization features
+- Additional model providers
+
+---
+
+# License
+
+This project is intended for research and development purposes.
