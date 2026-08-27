@@ -23,6 +23,12 @@ class VLMDecision(BaseModel):
     reasoning: Optional[str] = None
 
 
+def encode_image_to_base64(image_path: str) -> str:
+    """Encode an image file on disk to a base64 string for VLM payload transmission."""
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode("utf-8")
+
+
 class VLMArbiterService:
     def __init__(
         self,
@@ -34,8 +40,7 @@ class VLMArbiterService:
 
     @staticmethod
     def _encode_image(image_path: str) -> str:
-        with open(image_path, "rb") as image_file:
-            return base64.b64encode(image_file.read()).decode("utf-8")
+        return encode_image_to_base64(image_path)
 
     def evaluate_candidates(
         self, target_text: str, candidates: List[CandidateFrame]
@@ -60,7 +65,7 @@ class VLMArbiterService:
                 continue
 
             try:
-                base64_img = self._encode_image(str(img_path))
+                base64_img = encode_image_to_base64(str(img_path))
                 prompt = (
                     f"Does this video frame contain on-screen text or subtitles matching: '{target_text}'?\n"
                     "Respond strictly in JSON format with no markdown wrappers:\n"
