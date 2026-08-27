@@ -19415,4 +19415,217 @@ class SpeechToTextService:
 
 what abt this. 
 
-153. 
+153. Yes — I’d incorporate the **integration part**, but I would **not blindly adopt the “Token Set Ratio = superior” and “HF is free/local” claims** as stated. The important concrete change is that `pipeline.py` must match the new `WordTimestamp` interface, and we should validate the WAV before sending it to STT.
+
+There is one other correction: your current `schemas.py` defines `WordTimestamp`, so the pipeline should pass those objects directly. Also, your current `extract_audio_stream()` produces a WAV, so adding a small validity check is appropriate.
+
+### Update `pipeline.py`
+
+Add this helper near the top:
+
+```python
+def is_valid_wav(audio_path: Path) -> bool:
+    """
+    Basic validation that the extracted audio file exists,
+    is non-empty, and has a WAV extension.
+    """
+    try:
+        return (
+            audio_path.exists()
+            and audio_path.is_file()
+            and audio_path.stat().st_size > 44
+            and audio_path.suffix.lower() == ".wav"
+        )
+    except OSError:
+        return False
+```
+
+Then replace the Tier 1 section with:
+
+```python
+# ==================================================
+# TIER 1 : STREAM AUDIO -> WHISPER STT
+# ==================================================
+stt_result = STTResult(found=False)
+
+try:
+    logger.info("Extracting audio directly from stream")
+
+    audio_path = self.ingestion_service.extract_audio_stream(
+        video_source,
+        job_id=job_id,
+        output_dir=temp_dir,
+        allow_download=False,
+    )
+
+    if isinstance(audio_path, str):
+        audio_path = Path(audio_path)
+
+    if not is_valid_wav(audio_path):
+        logger.warning(
+            "Extracted audio is invalid or empty: %s. "
+            "Skipping Tier 1 STT.",
+            audio_path,
+        )
+    else:
+        logger.info(
+            "Valid WAV extracted: %s (%d bytes)",
+            audio_path,
+            audio_path.stat().st_size,
+        )
+
+        logger.info("Running Whisper STT")
+
+        # New primary_stt.py returns List[WordTimestamp]
+        word_timestamps = self.stt_service.transcribe_audio(
+            audio_path
+        )
+
+        logger.info(
+            "Received %d timestamped words from STT",
+            len(word_timestamps),
+        )
+
+        stt_result = self.stt_service.align_target_dialogue(
+            word_timestamps,
+            request.target_text,
+        )
+
+except Exception as e:
+    logger.warning(
+        "Tier 1 acoustic processing failed: %s",
+        e,
+    )
+```
+
+### Important: don't change the rest of Tier 1
+
+Your existing code:
+
+```python
+if stt_result.found and stt_result.confidence >= 0.70:
+```
+
+can remain.
+
+And these:
+
+```python
+stt_result.start_time
+stt_result.end_time
+stt_result.matched_text
+stt_result.confidence
+```
+
+are already compatible with your `STTResult`.
+
+---
+
+## One thing I would change in `primary_stt.py`
+
+Your proposed alignment uses:
+
+```python
+fuzz.token_set_ratio(...)
+```
+
+That can be useful, but it **ignores word order**, which is not always desirable for dialogue matching.
+
+For a phrase locator, I would prefer:
+
+```python
+fuzz.ratio(norm_target, candidate_norm) / 100.0
+```
+
+or potentially:
+
+```python
+fuzz.token_sort_ratio(norm_target, candidate_norm) / 100.0
+```
+
+because the target is a **sequence of spoken words**, not merely a bag of words.
+
+For example:
+
+```text
+Target:
+"my mind rebels at stagnation"
+
+Candidate:
+"stagnation at my mind rebels"
+```
+
+A token-set matcher can consider these extremely similar even though the spoken sequence is wrong.
+
+So I'd keep the provider abstraction and lazy initialization, but I would **not make `token_set_ratio` the default matching rule** without testing against your actual dialogue corpus.
+
+---
+
+# Your `.env`
+
+Your current configuration is already aligned with the provider abstraction:
+
+```env
+WHISPER_PROVIDER=groq
+WHISPER_MODEL_NAME=whisper-large-v3
+GROQ_API_KEY=your_key
+HF_TOKEN=your_token
+```
+
+And `primary_stt.py` now reads:
+
+```python
+self.provider = provider or settings.whisper_provider
+self.model_name = model_name or settings.whisper_model_name
+```
+
+So the major startup problem is solved: **no `faster-whisper` model download should occur just because Uvicorn imports `PipelineOrchestrator`.**
+
+---
+
+## Do this now
+
+First run the regression suite:
+
+```powershell
+pytest -q
+```
+
+Then start the server:
+
+```powershell
+uvicorn src.app:app --reload
+```
+
+You should **not** see:
+
+```text
+Loading faster-whisper model: turbo
+```
+
+or Hugging Face model snapshot downloading during startup.
+
+Then test the exact Russian/Odnoklassniki case through your API with:
+
+```text
+URL:
+https://ok.ru/video/248244667877
+
+Target:
+My mind rebels at stagnation
+```
+
+The key thing we want to see in the Uvicorn terminal is:
+
+```text
+Extracting audio directly from stream
+Valid WAV extracted: ...
+Running Whisper STT
+Received N timestamped words from STT
+```
+
+That will finally tell us whether **the actual stream → WAV → STT path** is working, rather than falling back to a full video download.
+
+One important caveat: even with this architecture, Groq receives the extracted audio file, so for a **54-minute video** your current implementation still processes a long audio track. The next performance improvement should be **targeted audio-window extraction rather than extracting all 54 minutes**, once we verify the basic path works.
+
+gimme the full code for this as well.

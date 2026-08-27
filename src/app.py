@@ -1,105 +1,118 @@
-import logging
 import uuid
+import logging
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, status
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
-from src.models.schemas import DetectionResult, JobRequest, JobStatus
+from src.config import settings
+from src.models.schemas import JobRequest, DetectionResult, JobStatus
 from src.pipeline import PipelineOrchestrator
 
-logger = logging.getLogger("quest1.api")
-logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="Quest1 Dynamic Dialogue Detection API",
-    description="Multi-tier hybrid AI service for pinpointing video timestamps and frame artifacts.",
+    title="Quest1: Dynamic Dialogue Detector API",
     version="1.0.0",
+    description="5-Tier Cascade Pipeline for Video Stream Dialogue Localization",
 )
 
-# In-memory storage for asynchronous job statuses and results
+# CORS configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Static artifact serving path setup
+artifacts_path = getattr(
+    settings,
+    "artifacts_dir",
+    getattr(settings, "artifact_storage_dir", Path("artifacts")),
+)
+artifacts_dir = Path(artifacts_path)
+artifacts_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/artifacts", StaticFiles(directory=str(artifacts_dir)), name="artifacts")
+
+# In-memory storage dictionary expected by pytest suite
 JOBS_DB: Dict[str, DetectionResult] = {}
 orchestrator = PipelineOrchestrator()
 
 
-def _process_job_task(job_id: str, request: JobRequest) -> None:
-    """Background worker function executing the pipeline orchestrator."""
+def _execute_pipeline_background(job_id: str, request: JobRequest) -> None:
+    """Background task runner for executing 5-tier pipeline processing."""
     logger.info("Background task started for job %s", job_id)
     try:
-        result = orchestrator.run(job_id=job_id, request=request)
+        result = orchestrator.run(job_id, request)
+        
+        # Format image path for static access if frame artifact exists
+        if result.frame_image_path and Path(result.frame_image_path).exists():
+            img_name = Path(result.frame_image_path).name
+            result.frame_image_path = f"/artifacts/{job_id}/{img_name}"
+            
         JOBS_DB[job_id] = result
         logger.info("Background task completed for job %s with status %s", job_id, result.status)
     except Exception as exc:
-        logger.error("Background task unhandled failure for job %s: %s", job_id, exc)
+        logger.exception("Background execution failed for job %s: %s", job_id, exc)
         JOBS_DB[job_id] = DetectionResult(
             job_id=job_id,
             status=JobStatus.FAILED,
             target_dialogue=request.target_text,
-            error_message=f"Pipeline error: {str(exc)}",
+            error_message=str(exc),
         )
 
 
-@app.post(
-    "/api/v1/jobs",
-    response_model=DetectionResult,
-    status_code=status.HTTP_202_ACCEPTED,
-    summary="Submit a dialogue localization job",
-)
-async def create_detection_job(request: JobRequest, background_tasks: BackgroundTasks):
-    """Enqueues a dialogue search job and immediately returns job tracking metadata."""
+@app.post("/api/v1/jobs", status_code=202)
+async def create_detection_job(
+    request: JobRequest, background_tasks: BackgroundTasks
+) -> Dict[str, str]:
+    """Queues a dialogue detection job asynchronously."""
     job_id = f"job_{uuid.uuid4().hex[:10]}"
     
-    initial_result = DetectionResult(
+    # Store initial pending result state
+    JOBS_DB[job_id] = DetectionResult(
         job_id=job_id,
         status=JobStatus.PROCESSING,
         target_dialogue=request.target_text,
     )
-    JOBS_DB[job_id] = initial_result
+    
+    background_tasks.add_task(_execute_pipeline_background, job_id, request)
+    return {
+        "job_id": job_id,
+        "status": "processing",
+        "target_dialogue": request.target_text,
+    }
 
-    background_tasks.add_task(_process_job_task, job_id, request)
-    return initial_result
 
-
-@app.get(
-    "/api/v1/jobs/{job_id}",
-    response_model=DetectionResult,
-    summary="Poll job status and detection output",
-)
-async def get_job_status(job_id: str):
-    """Retrieves current processing state, tier execution result, and confidence scores."""
+@app.get("/api/v1/jobs/{job_id}", response_model=DetectionResult)
+async def get_job_status(job_id: str) -> DetectionResult:
+    """Retrieves pipeline execution status or final DetectionResult schema."""
     if job_id not in JOBS_DB:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Job ID '{job_id}' not found.",
-        )
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
     return JOBS_DB[job_id]
 
 
-@app.get(
-    "/api/v1/jobs/{job_id}/frame",
-    summary="Download verified candidate frame image",
-)
+@app.get("/api/v1/jobs/{job_id}/frame")
 async def get_job_frame(job_id: str):
-    """Serves the persisted candidate frame JPEG artifact for completed jobs."""
+    """Serves extracted candidate frame image binary directly."""
     if job_id not in JOBS_DB:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Job ID '{job_id}' not found.",
-        )
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+    
+    job = JOBS_DB[job_id]
+    if not job.frame_image_path:
+        raise HTTPException(status_code=400, detail="No frame artifact available for this job.")
+    
+    frame_path = Path(job.frame_image_path)
+    if not frame_path.is_absolute() and str(job.frame_image_path).startswith("/artifacts/"):
+        rel_path = str(job.frame_image_path).replace("/artifacts/", "", 1)
+        frame_path = artifacts_dir / rel_path
 
-    job_result = JOBS_DB[job_id]
-    if job_result.status != JobStatus.COMPLETED or not job_result.frame_image_path:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Job '{job_id}' does not have a verified frame artifact available.",
-        )
-
-    frame_path = Path(job_result.frame_image_path)
     if not frame_path.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Frame artifact file missing from storage.",
-        )
+        raise HTTPException(status_code=400, detail="Frame artifact file does not exist on disk.")
 
-    return FileResponse(path=frame_path, media_type="image/jpeg", filename=frame_path.name)
+    return FileResponse(frame_path, media_type="image/jpeg")
