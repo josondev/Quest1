@@ -1,8 +1,8 @@
-# Quest1 — Dynamic Dialogue Detection Engine
+# My project for Quest1 — Dynamic Dialogue Detection Engine
 
-Quest1 is an end-to-end AI-powered media analysis system designed to locate target spoken or visual dialogue occurrences inside video content.
+My project is an end-to-end AI-powered media analysis system designed to locate target spoken or visual dialogue occurrences inside video content.
 
-Given a video source and a target dialogue, Quest1 analyzes the media using a progressive five-tier detection pipeline to determine:
+Given a video source and a target dialogue, My project analyzes the media using a progressive five-tier detection pipeline to determine:
 
 - Where the dialogue occurs
 - Whether it appears through speech or visual text
@@ -18,7 +18,7 @@ The system supports:
 - Adaptive streaming sources
 - Standard MP4 media
 
-Instead of relying on a single detection method, Quest1 combines subtitle analysis, speech recognition, OCR-based visual search, and Vision-Language Model verification to provide reliable dialogue localization.
+Instead of relying on a single detection method, My project combines subtitle analysis, speech recognition, OCR-based visual search, and Vision-Language Model verification to provide reliable dialogue localization.
 
 ---
 
@@ -37,7 +37,7 @@ However, real-world media introduces several challenges:
 - Streaming sources may block automated access
 - Large media files may exceed API payload limits
 
-Quest1 addresses these challenges using a progressive fallback architecture.
+My project addresses these challenges using a progressive fallback architecture.
 
 ```text
                          Video Source
@@ -72,7 +72,7 @@ Quest1 addresses these challenges using a progressive fallback architecture.
 
 ## Five-Tier Detection Pipeline
 
-Quest1 dynamically increases computational complexity only when required.
+My project dynamically increases computational complexity only when required.
 
 ```text
 Fast + Low Compute
@@ -148,7 +148,7 @@ Advantages:
 
 ## Tier 1 — Speech Recognition Alignment
 
-When subtitle information is unavailable, Quest1 uses speech recognition.
+When subtitle information is unavailable, My project uses speech recognition.
 
 The system:
 
@@ -171,7 +171,7 @@ This allows processing of longer media files while respecting inference constrai
 
 If speech-based localization is unavailable:
 
-Quest1 performs visual timeline searching.
+My project performs visual timeline searching.
 
 The system:
 
@@ -193,7 +193,7 @@ Useful for:
 
 After detecting a candidate region:
 
-Quest1 performs focused OCR analysis around the identified window.
+My project performs focused OCR analysis around the identified window.
 
 This improves:
 
@@ -209,7 +209,7 @@ The goal is to identify the strongest matching frame.
 
 When OCR confidence is insufficient:
 
-Quest1 extracts multiple candidate frame windows.
+My project extracts multiple candidate frame windows.
 
 The Vision-Language Model evaluates candidates using:
 
@@ -235,7 +235,7 @@ The ingestion layer prepares media sources before detection.
 
 ## CDN and Adaptive Stream Handling
 
-Quest1 supports:
+My project supports:
 
 - Remote streaming URLs
 - CDN-hosted media
@@ -248,7 +248,7 @@ When direct stream extraction is unavailable, the system can route processing th
 
 ## Header Injection
 
-For protected remote streams, Quest1 supports request headers such as:
+For protected remote streams, My project supports request headers such as:
 
 - User-Agent
 - Referer
@@ -261,7 +261,7 @@ This improves compatibility with restricted media sources.
 
 Before speech processing:
 
-Quest1 validates:
+My project validates:
 
 - Available audio streams
 - Compatible codec formats
@@ -282,7 +282,7 @@ for speech recognition compatibility.
 
 Direct OpenCV remote stream access can fail on Windows environments.
 
-Quest1 avoids this by:
+My project avoids this by:
 
 - Using FFmpeg seeking for remote frame extraction
 - Using OpenCV primarily for local processing
@@ -299,7 +299,7 @@ Large media files introduce several challenges:
 - Network interruptions
 - Processing failures
 
-Quest1 handles these through:
+My project handles these through:
 
 - Audio chunk extraction
 - Sequential processing
@@ -328,14 +328,14 @@ Recommended solutions:
 3. Download the media locally.
 4. Process the local file instead.
 
-Quest1 treats this as a source accessibility issue rather than a detection failure.
+My project treats this as a source accessibility issue rather than a detection failure.
 
 ---
 
 # Project Structure
 
 ```text
-Quest1/
+My project/
 
 ├── artifacts/
 │   └── Generated job outputs, JSON metadata, persistent frames
@@ -415,7 +415,7 @@ Quest1/
 
 ## Prerequisites
 
-Before running Quest1, install:
+Before running My project, install:
 
 - Python 3.10+
 - FFmpeg
@@ -455,9 +455,9 @@ ffmpeg -version
 ## 1. Clone Repository
 
 ```bash
-git clone https://github.com/josondev/Quest1.git
+git clone https://github.com/josondev/My project.git
 
-cd Quest1
+cd My project
 ```
 
 ---
@@ -508,7 +508,7 @@ MODEL_PROVIDER_API_KEY=<your_key>
 
 ---
 
-# Running Quest1
+# Running My project
 
 ## Start Backend API
 
@@ -551,7 +551,7 @@ The dashboard allows:
 
 # Docker Execution
 
-Quest1 includes Docker support.
+My project includes Docker support.
 
 Build and run:
 
@@ -570,7 +570,7 @@ docker-compose.yml
 
 # API Usage
 
-Quest1 exposes FastAPI endpoints for programmatic access.
+My project exposes FastAPI endpoints for programmatic access.
 
 ## Create Detection Job
 
@@ -640,7 +640,7 @@ The detected frame image if available.
 
 The FastAPI backend handles job creation, background execution, status tracking, and frame retrieval.
 
-![Quest1 Backend](assets/backend.png)
+![My project Backend](assets/backend.png)
 
 ---
 
@@ -648,15 +648,15 @@ The FastAPI backend handles job creation, background execution, status tracking,
 
 The NiceGUI interface provides a user-friendly dashboard for submitting detection tasks and monitoring results.
 
-![Quest1 Frontend](assets/frontend.png)
+![My project Frontend](assets/frontend.png)
 
 ---
 
 ## Detection Output
 
-Quest1 produces the final visual evidence frame corresponding to the detected dialogue.
+My project produces the final visual evidence frame corresponding to the detected dialogue.
 
-![Quest1 Detection Output](assets/the%20required%20output.jpg)
+![My project Detection Output](assets/the%20required%20output.jpg)
 
 ---
 
@@ -678,7 +678,7 @@ Quest1 produces the final visual evidence frame corresponding to the detected di
 
 # Testing
 
-Quest1 includes automated tests covering:
+My project includes automated tests covering:
 
 - API functionality
 - Configuration validation
@@ -708,7 +708,7 @@ Real-world media processing introduces unpredictable failures:
 - Model limitations
 - API constraints
 
-Quest1 is designed around graceful handling of these failures through:
+My project is designed around graceful handling of these failures through:
 
 - Progressive fallback processing
 - Media caching
@@ -739,7 +739,7 @@ Subtitles and speech recognition are preferred before expensive OCR and Vision-L
 
 ## Multi-Modal Verification
 
-Quest1 separates:
+My project separates:
 
 - Spoken dialogue detection
 - Visual text confirmation
