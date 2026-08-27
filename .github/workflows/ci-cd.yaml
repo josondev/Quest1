@@ -3,10 +3,11 @@ name: CI/CD Pipeline & GitHub Pages
 on:
   push:
     branches:
-      - main
+      - Rex
   pull_request:
     branches:
-      - main
+      - Rex
+  workflow_dispatch: # Allows manual trigger from the GitHub Actions tab
 
 permissions:
   contents: read
@@ -49,7 +50,7 @@ jobs:
   deploy-pages:
     name: Deploy GitHub Pages Showcase
     needs: test
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/Rex'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
