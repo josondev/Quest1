@@ -1,5 +1,8 @@
 import logging
 import re
+import subprocess
+import tempfile
+import time
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
@@ -166,27 +169,77 @@ class SpeechToTextService:
     ) -> List[WordTimestamp]:
         """
         Transcribe an audio file and return word-level timestamps.
+        Automatically chunks files larger than 24MB via FFmpeg to 
+        bypass strict provider upload limits.
         """
         audio_path = Path(audio_path)
-
         self._validate_audio_file(audio_path)
 
+        file_size_mb = audio_path.stat().st_size / (1024 * 1024)
+
         logger.info(
-            "Starting STT: provider=%s file=%s size=%d bytes",
+            "Starting STT: provider=%s file=%s size=%.2f MB",
             self.provider,
             audio_path,
-            audio_path.stat().st_size,
+            file_size_mb,
         )
 
-        if self.provider == "groq":
-            return self._transcribe_with_groq(audio_path)
+        if file_size_mb < 24.0:
+            if self.provider == "groq":
+                return self._transcribe_with_groq(audio_path, offset=0.0)
+            if self.provider == "huggingface":
+                return self._transcribe_with_hf(audio_path, offset=0.0)
+            raise ValueError(f"Unsupported provider: {self.provider}")
 
-        if self.provider == "huggingface":
-            return self._transcribe_with_hf(audio_path)
+        logger.info("Audio exceeds 24MB limit. Chunking file via FFmpeg...")
+        words: List[WordTimestamp] = []
 
-        raise ValueError(
-            f"Unsupported provider: {self.provider}"
-        )
+        with tempfile.TemporaryDirectory(prefix="stt_chunks_") as tmpdir:
+            chunk_pattern = Path(tmpdir) / "chunk_%03d.wav"
+
+            # Segment into 10-minute (600s) chunks to stay safely under limits
+            cmd = [
+                "ffmpeg", "-y", "-i", str(audio_path),
+                "-f", "segment", "-segment_time", "600",
+                "-c", "copy", str(chunk_pattern)
+            ]
+
+            try:
+                subprocess.run(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=True
+                )
+            except subprocess.CalledProcessError as exc:
+                logger.error("FFmpeg chunking failed: %s", exc)
+                raise RuntimeError(f"FFmpeg chunking failed: {exc}") from exc
+
+            chunks = sorted(Path(tmpdir).glob("chunk_*.wav"))
+
+            for idx, chunk_path in enumerate(chunks):
+                offset_seconds = idx * 600.0
+                logger.info(
+                    "Transcribing chunk %d/%d (offset +%.1fs)",
+                    idx + 1,
+                    len(chunks),
+                    offset_seconds,
+                )
+                
+                if self.provider == "groq":
+                    chunk_words = self._transcribe_with_groq(
+                        chunk_path, offset=offset_seconds
+                    )
+                elif self.provider == "huggingface":
+                    chunk_words = self._transcribe_with_hf(
+                        chunk_path, offset=offset_seconds
+                    )
+                else:
+                    raise ValueError(f"Unsupported provider: {self.provider}")
+
+                words.extend(chunk_words)
+
+        return words
 
     # ==========================================================
     # GROQ
@@ -195,9 +248,11 @@ class SpeechToTextService:
     def _transcribe_with_groq(
         self,
         audio_path: Path,
+        offset: float = 0.0,
     ) -> List[WordTimestamp]:
         """
         Transcribe using Groq Whisper with word timestamps.
+        Includes an exponential backoff retry loop for stability.
         """
         client = self._get_groq_client()
 
@@ -206,27 +261,37 @@ class SpeechToTextService:
             self.model_name,
         )
 
-        try:
-            with audio_path.open("rb") as audio_file:
-                transcription = (
-                    client.audio.transcriptions.create(
-                        file=(
-                            audio_path.name,
-                            audio_file.read(),
-                        ),
-                        model=self.model_name,
-                        response_format="verbose_json",
-                        timestamp_granularities=["word"],
-                        temperature=0.0,
+        max_attempts = 3
+        transcription = None
+
+        for attempt in range(max_attempts):
+            try:
+                with audio_path.open("rb") as audio_file:
+                    transcription = (
+                        client.audio.transcriptions.create(
+                            file=(
+                                audio_path.name,
+                                audio_file.read(),
+                            ),
+                            model=self.model_name,
+                            response_format="verbose_json",
+                            timestamp_granularities=["word"],
+                            temperature=0.0,
+                        )
                     )
+                break  # Successful API call
+            except Exception as exc:
+                if attempt == max_attempts - 1:
+                    logger.exception(
+                        "Groq transcription failed after %d attempts.", max_attempts
+                    )
+                    raise RuntimeError(f"Groq STT failed: {exc}") from exc
+                
+                wait_time = 2 ** attempt
+                logger.warning(
+                    "Groq API connection error, retrying in %ds... (%s)", wait_time, exc
                 )
-        except Exception as exc:
-            logger.exception(
-                "Groq transcription failed."
-            )
-            raise RuntimeError(
-                f"Groq STT failed: {exc}"
-            ) from exc
+                time.sleep(wait_time)
 
         words: List[WordTimestamp] = []
 
@@ -242,14 +307,14 @@ class SpeechToTextService:
                         raw_word.get("word", "")
                     ).strip()
 
-                    start = float(
+                    raw_start = float(
                         raw_word.get("start", 0.0)
                         or 0.0
                     )
 
-                    end = float(
-                        raw_word.get("end", start)
-                        or start
+                    raw_end = float(
+                        raw_word.get("end", raw_start)
+                        or raw_start
                     )
 
                     probability_raw = raw_word.get(
@@ -269,7 +334,7 @@ class SpeechToTextService:
                         )
                     ).strip()
 
-                    start = float(
+                    raw_start = float(
                         getattr(
                             raw_word,
                             "start",
@@ -278,13 +343,13 @@ class SpeechToTextService:
                         or 0.0
                     )
 
-                    end = float(
+                    raw_end = float(
                         getattr(
                             raw_word,
                             "end",
-                            start,
+                            raw_start,
                         )
-                        or start
+                        or raw_start
                     )
 
                     probability_raw = getattr(
@@ -312,8 +377,8 @@ class SpeechToTextService:
                     words.append(
                         WordTimestamp(
                             word=word_text,
-                            start=start,
-                            end=end,
+                            start=raw_start + offset,
+                            end=raw_end + offset,
                             probability=probability,
                         )
                     )
@@ -338,6 +403,7 @@ class SpeechToTextService:
     def _transcribe_with_hf(
         self,
         audio_path: Path,
+        offset: float = 0.0,
     ) -> List[WordTimestamp]:
         """
         Transcribe using Hugging Face inference.
@@ -421,7 +487,7 @@ class SpeechToTextService:
                     and len(timestamp) >= 2
                 ):
                     try:
-                        start = float(
+                        raw_start = float(
                             timestamp[0]
                             if timestamp[0] is not None
                             else 0.0
@@ -430,19 +496,25 @@ class SpeechToTextService:
                         TypeError,
                         ValueError,
                     ):
-                        start = 0.0
+                        raw_start = 0.0
 
                     try:
-                        end = float(
+                        raw_end = float(
                             timestamp[1]
                             if timestamp[1] is not None
-                            else start
+                            else raw_start
                         )
                     except (
                         TypeError,
                         ValueError,
                     ):
-                        end = start
+                        raw_end = raw_start
+                    
+                    start = raw_start + offset
+                    end = raw_end + offset
+                else:
+                    start += offset
+                    end += offset
 
                 words.append(
                     WordTimestamp(

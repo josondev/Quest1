@@ -208,7 +208,7 @@ Hello world
         mock_ydl_cls.return_value.__enter__.return_value = mock_ydl
         mock_ydl.extract_info.return_value = {
             "subtitles": {},
-            "automatic_captions": {"en": [{"ext": "vtt"}]},
+            "automatic_captions": {"en": [{"ext": "vtt", "url": "http://example.com/auto_sub.vtt"}]},
         }
 
         service = StreamIngestionService()
@@ -288,7 +288,9 @@ Hello world
             service.probe_metadata("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
 
     # 18. Local Audio Extraction Shortcut
-    def test_extract_audio_stream_local(self, tmp_path):
+    @patch("subprocess.run")
+    def test_extract_audio_stream_local(self, mock_subprocess_run, tmp_path):
+        mock_subprocess_run.return_value.returncode = 0
         local_audio = tmp_path / "local_audio.wav"
         local_audio.touch()
 
@@ -298,7 +300,8 @@ Hello world
 
     # 19. Remote Audio Extraction Success
     @patch("yt_dlp.YoutubeDL")
-    def test_extract_audio_stream_remote(self, mock_ydl_cls, tmp_path):
+    def test_extract_audio_stream_remote(self, mock_ydl_cls, mock_subprocess_run, tmp_path):
+        mock_subprocess_run.return_value.returncode = 0
         mock_ydl = MagicMock()
         mock_ydl_cls.return_value.__enter__.return_value = mock_ydl
 

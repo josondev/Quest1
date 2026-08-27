@@ -8,7 +8,6 @@ import time
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
-from urllib.parse import urlparse
 
 import cv2
 import yt_dlp
@@ -412,20 +411,22 @@ class StreamIngestionService:
 
                     stream_path = None
                     formats = info.get("formats", []) if isinstance(info, dict) else []
-                    valid_formats = [
+
+                    # Filter formats containing valid VIDEO codecs for frame extraction
+                    video_formats = [
                         f for f in formats 
-                        if isinstance(f, dict) and f.get("url") and f.get("acodec") not in (None, "none")
+                        if isinstance(f, dict) and f.get("url") and f.get("vcodec") not in (None, "none")
                     ]
 
-                    if valid_formats:
-                        valid_formats.sort(
+                    if video_formats:
+                        video_formats.sort(
                             key=lambda f: (
-                                not (f.get("protocol", "").startswith("m3u8") or ".m3u8" in f.get("url", "") or f.get("url", "").endswith("/video/")),
                                 f.get("height") or 0,
+                                f.get("fps") or 0,
                             ),
                             reverse=True,
                         )
-                        stream_path = valid_formats[0].get("url")
+                        stream_path = video_formats[0].get("url")
 
                     if not stream_path and isinstance(info, dict):
                         stream_path = info.get("url") or url_or_path
@@ -533,12 +534,11 @@ class StreamIngestionService:
         audio_url: Optional[str] = None
         is_mock = False
 
-        # FIX: Detect non-standard CDN URLs and force download fallback
         if self._is_direct_stream(url_or_path):
             is_standard_manifest = any(ext in url_or_path.lower() for ext in ['.m3u8', '.mpd'])
             if not is_standard_manifest:
                 logger.warning("Non-standard CDN URL detected (%s); skipping stream extraction.", url_or_path[:80])
-                audio_url = None  # Force fallback to download
+                audio_url = None
             else:
                 logger.info("Standard manifest detected; attempting stream extraction.")
                 audio_url = url_or_path
@@ -565,7 +565,6 @@ class StreamIngestionService:
                     info = ydl.extract_info(url_or_path, download=False)
                     formats = info.get("formats", []) if isinstance(info, dict) else []
 
-                    # Strictly filter for formats containing audio codecs
                     audio_formats = [
                         f for f in formats
                         if isinstance(f, dict) and f.get("url") and f.get("acodec") not in (None, "none")
@@ -586,15 +585,6 @@ class StreamIngestionService:
                         audio_formats.sort(key=format_score, reverse=True)
                         selected = audio_formats[0]
                         audio_url = selected["url"]
-
-                        logger.info(
-                            "Selected format: id=%s ext=%s acodec=%s vcodec=%s",
-                            selected.get("format_id"),
-                            selected.get("ext"),
-                            selected.get("acodec"),
-                            selected.get("vcodec"),
-                        )
-                    # Dangerous fallback to info.get("url") removed to prevent video-only stream extraction
             except Exception as exc:
                 logger.warning("yt_dlp extraction failed for %s: %s", url_or_path, exc)
 
@@ -665,8 +655,6 @@ class StreamIngestionService:
             ):
                 return out_path
 
-            logger.error("FFmpeg failed:\n%s", result.stderr)
-
         if is_mock and not (out_path.exists() and out_path.stat().st_size > 0):
             try:
                 ydl_opts_dl = {
@@ -713,29 +701,45 @@ class StreamIngestionService:
     ) -> bool:
         stream_target = self._resolve_direct_stream_url(stream_url)
         output_jpg.parent.mkdir(parents=True, exist_ok=True)
-        
-        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-threads", "1",
-            "-user_agent", user_agent,
-            "-referer", "https://ok.ru/",
-            "-reconnect", "1",
-            "-reconnect_streamed", "1",
-            "-reconnect_delay_max", "5",
+
+        user_agent = (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+
+        cmd = ["ffmpeg", "-y", "-threads", "1"]
+
+        # Only pass network/stream headers when target is a remote URL
+        if stream_target.startswith("http"):
+            cmd.extend([
+                "-user_agent", user_agent,
+                "-referer", "https://ok.ru/",
+                "-reconnect", "1",
+                "-reconnect_streamed", "1",
+                "-reconnect_delay_max", "5",
+            ])
+
+        cmd.extend([
             "-ss", f"{timestamp_seconds:.3f}",
             "-i", stream_target,
             "-vframes", "1",
             "-q:v", "2",
             str(output_jpg),
-        ]
+        ])
+
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             if res.returncode != 0:
                 logger.warning("FFmpeg frame capture failed: %s", res.stderr[-300:])
-            return bool(res.returncode == 0 and output_jpg.exists() and output_jpg.stat().st_size > 0)
+            return bool(
+                res.returncode == 0
+                and output_jpg.exists()
+                and output_jpg.stat().st_size > 0
+            )
         except Exception as exc:
-            logger.warning("Failed on-demand frame capture at %.2fs: %s", timestamp_seconds, exc)
+            logger.warning(
+                "Failed on-demand frame capture at %.2fs: %s",
+                timestamp_seconds,
+                exc,
+            )
             return False
