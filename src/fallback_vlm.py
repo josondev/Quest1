@@ -9,13 +9,11 @@ from pydantic import BaseModel
 from src.config import settings
 from src.models.schemas import CandidateFrame
 
-# Module-level attribute required for unittest.mock @patch("src.fallback_vlm.OpenAI")
+# Required module-level symbol for unittest.mock @patch("src.fallback_vlm.OpenAI")
 try:
     from openai import OpenAI
 except ImportError:
-    OpenAI = None  # type: ignore
-
-logger = logging.getLogger(__name__)
+    OpenAI = None
 
 
 class VLMError(Exception):
@@ -74,13 +72,20 @@ class VLMArbiterService:
         client: Optional[Any] = None,
         model: Optional[str] = None,
         provider: Optional[str] = None,
+        base_url: Optional[str] = None,
+        **kwargs: Any,
     ):
         if api_key is not None:
             self.api_key = api_key
         else:
-            self.api_key = getattr(settings, "vlm_api_key", "") or getattr(settings, "groq_api_key", "")
+            self.api_key = (
+                getattr(settings, "nvidia_api_key", "")
+                or getattr(settings, "vlm_api_key", "")
+                or getattr(settings, "groq_api_key", "")
+            )
 
-        self.model = model or getattr(settings, "vlm_model_name", "llama-3.2-11b-vision-preview")
+        self.model = model or getattr(settings, "nvidia_vlm_model", "meta/llama-3.2-11b-vision-instruct")
+        self.base_url = base_url or getattr(settings, "nvidia_base_url", "https://integrate.api.nvidia.com/v1")
         self.client = client
 
     def _get_client(self) -> Any:
@@ -89,7 +94,10 @@ class VLMArbiterService:
         if not self.api_key:
             raise VLMError("API Key is not configured")
         if OpenAI is not None:
-            self.client = OpenAI(api_key=self.api_key)
+            self.client = OpenAI(
+                api_key=self.api_key,
+                base_url=self.base_url,
+            )
             return self.client
         raise VLMError("API Key is not configured")
 

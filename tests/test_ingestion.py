@@ -284,7 +284,7 @@ Hello world
         mock_ydl.extract_info.side_effect = Exception("Network blocked")
 
         service = StreamIngestionService()
-        with pytest.raises(IngestionError, match="Probing metadata failed"):
+        with pytest.raises(IngestionError, match="Metadata probing failed: Network blocked"):
             service.probe_metadata("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
 
     # 18. Local Audio Extraction Shortcut
