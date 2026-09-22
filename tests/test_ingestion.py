@@ -302,15 +302,32 @@ Hello world
     @patch("subprocess.run")
     @patch("yt_dlp.YoutubeDL")
     def test_extract_audio_stream_remote(self, mock_ydl_cls, mock_subprocess_run, tmp_path):
-        mock_subprocess_run.return_value.returncode = 0
         mock_ydl = MagicMock()
         mock_ydl_cls.return_value.__enter__.return_value = mock_ydl
 
-        def fake_download(urls):
-            out_file = tmp_path / "audio_job1_audio.wav"
-            out_file.touch()
+        out_wav = tmp_path / "job1_audio.wav"
 
-        mock_ydl.download.side_effect = fake_download
+        mock_ydl.extract_info.return_value = {
+            "formats": [
+                {
+                    "url": "https://example.com/audio.m4a",
+                    "acodec": "aac",
+                    "vcodec": "none",
+                    "protocol": "https",
+                    "format_id": "140",
+                    "ext": "m4a",
+                }
+            ]
+        }
+
+        def fake_subprocess_run(cmd, **kwargs):
+            # Simulate ffmpeg succeeding and writing the output file
+            out_wav.write_bytes(b"\x00" * 100)
+            result = MagicMock()
+            result.returncode = 0
+            return result
+
+        mock_subprocess_run.side_effect = fake_subprocess_run
 
         service = StreamIngestionService()
         audio_file = service.extract_audio_stream("https://youtube.com/watch?v=test", job_id="job1", output_dir=tmp_path)

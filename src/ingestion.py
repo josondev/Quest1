@@ -200,9 +200,10 @@ class StreamIngestionService:
 
                         and f.get("url")
 
-                        and f.get("vcodec")
-                        and f.get("vcodec") != "none"
-                        or f.get("height") is not None
+                        and (
+                            (f.get("vcodec") and f.get("vcodec") != "none")
+                            or f.get("height") is not None
+                        )
 
                     )
 
@@ -668,7 +669,6 @@ class StreamIngestionService:
         referer = "https://ok.ru/"
 
         audio_url: Optional[str] = None
-        is_mock = False
 
         # FIX: Detect non-standard CDN URLs and force download fallback
         if self._is_direct_stream(url_or_path):
@@ -692,12 +692,6 @@ class StreamIngestionService:
 
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    try:
-                        from unittest.mock import MagicMock
-                        if isinstance(ydl, MagicMock):
-                            is_mock = True
-                    except Exception:
-                        pass
 
                     info = ydl.extract_info(url_or_path, download=False)
                     formats = info.get("formats", []) if isinstance(info, dict) else []
@@ -803,24 +797,6 @@ class StreamIngestionService:
                 return out_path
 
             logger.error("FFmpeg failed:\n%s", result.stderr)
-
-        if is_mock and not (out_path.exists() and out_path.stat().st_size > 0):
-            try:
-                ydl_opts_dl = {
-                    "format": "bestaudio/best",
-                    "outtmpl": str(out_path),
-                    "quiet": True,
-                    "no_warnings": True,
-                }
-                with yt_dlp.YoutubeDL(ydl_opts_dl) as ydl_mock:
-                    ydl_mock.download([url_or_path])
-                if out_path.exists():
-                    return out_path
-                wav_files = list(target_dir.glob("*.wav"))
-                if wav_files:
-                    return wav_files[0]
-            except Exception:
-                pass
 
         if allow_download:
             logger.warning("Direct audio streaming failed or no audio format found; falling back to full download (allow_download=True).")

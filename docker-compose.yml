@@ -10,4 +10,5 @@ services:
       - .env
     volumes:
       - ./artifacts:/app/artifacts
+      - ./temp_data:/app/temp_data
     restart: unless-stopped

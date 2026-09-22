@@ -2,7 +2,8 @@ import httpx
 from nicegui import ui
 
 
-BACKEND_URL = "http://127.0.0.1:8000"
+import os
+BACKEND_URL = os.environ.get("BACKEND_URL", "http://127.0.0.1:8000")
 POLL_INTERVAL_SECONDS = 1.5
 
 TERMINAL_STATUSES = {
@@ -337,6 +338,7 @@ def dashboard():
             "Status: Waiting"
         )
 
+        error_label.text = state["error"] or ""
 
         result_container.clear()
 

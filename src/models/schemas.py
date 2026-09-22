@@ -2,7 +2,7 @@ from enum import Enum
 from pathlib import Path
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class JobStatus(str, Enum):
@@ -59,6 +59,12 @@ class JobRequest(BaseModel):
         min_length=1
     )
 
+
+    @model_validator(mode="after")
+    def validate_url_or_local(self) -> "JobRequest":
+        if self.url is None and self.local_file_path is None:
+            raise ValueError("Either url or local_file_path must be provided")
+        return self
 
     @field_validator("url")
     @classmethod
@@ -318,6 +324,8 @@ class DetectionResult(BaseModel):
     # ==========================
 
     frame_image_path: Optional[str] = None
+
+    cropped_roi_path: Optional[str] = None
 
 
     # ==========================
