@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quest1 — Dynamic Dialogue Detection Engine</title>
+  <style>
+    :root {
+      --bg: #0d1117; --surface: #161b22; --border: #30363d;
+      --text: #e6edf3; --muted: #8b949e; --accent: #2f81f7;
+      --green: #3fb950; --yellow: #d29922;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.6; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 2.5rem 1rem; text-align: center; }
+    header h1 { font-size: 2.6rem; font-weight: 700; }
+    header p { color: var(--muted); margin-top: .5rem; font-size: 1.1rem; }
+    .badges { margin-top: 1rem; }
+    .badge { display: inline-block; font-size: .75rem; font-weight: 600; padding: .25rem .7rem; border-radius: 2rem; margin: .2rem; }
+    .badge.blue { background: var(--accent); color: #fff; }
+    .badge.green { background: var(--green); color: #fff; }
+    .badge.yellow { background: var(--yellow); color: #000; }
+    main { max-width: 920px; margin: 2.5rem auto; padding: 0 1.5rem; }
+    section { margin-bottom: 3rem; }
+    h2 { font-size: 1.5rem; font-weight: 600; border-bottom: 1px solid var(--border); padding-bottom: .5rem; margin-bottom: 1.25rem; }
+    h3 { font-size: 1rem; font-weight: 600; color: var(--accent); margin: 1.2rem 0 .4rem; }
+    p { color: var(--muted); margin-bottom: .75rem; }
+    .tier-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); gap: 1rem; }
+    .tier-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.1rem; text-align: center; }
+    .tier-card .num { font-size: 2rem; font-weight: 700; color: var(--accent); }
+    .tier-card .lbl { font-size: .78rem; color: var(--muted); margin-top: .3rem; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: .6rem 1rem; border: 1px solid var(--border); font-size: .9rem; }
+    th { background: var(--surface); color: var(--muted); text-align: left; }
+    pre { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; overflow-x: auto; font-size: .84rem; color: var(--green); margin-bottom: 1rem; }
+    .ep { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: .7rem 1rem; margin-bottom: .7rem; display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+    .method { font-weight: 700; font-size: .78rem; padding: .2rem .55rem; border-radius: 4px; white-space: nowrap; }
+    .post { background: #238636; color: #fff; }
+    .get  { background: #1f6feb; color: #fff; }
+    .path { font-family: monospace; font-size: .9rem; }
+    .edesc { color: var(--muted); font-size: .82rem; margin-left: auto; }
+    footer { text-align: center; padding: 2rem 1rem; border-top: 1px solid var(--border); color: var(--muted); font-size: .85rem; margin-top: 2rem; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Quest1</h1>
+  <p>Dynamic Dialogue Detection Engine &mdash; 5-Tier AI Video Analysis Pipeline</p>
+  <div class="badges">
+    <span class="badge green">82 Tests Passing</span>
+    <span class="badge blue">FastAPI</span>
+    <span class="badge blue">Python 3.11</span>
+    <span class="badge yellow">Docker Ready</span>
+    <span class="badge blue">NiceGUI</span>
+  </div>
+</header>
+<main>
+
+  <section>
+    <h2>What is Quest1?</h2>
+    <p>Quest1 is an end-to-end AI-powered media analysis system that locates target spoken or visual dialogue inside video content. Given a video URL and a target dialogue string, it determines the exact timestamp, frame number, confidence score, and a verified frame image.</p>
+    <p>Instead of relying on a single modality, Quest1 chains subtitle analysis, Whisper speech recognition, Mistral OCR visual search, and Llama Vision Model arbitration into a progressive fallback pipeline that short-circuits at the cheapest successful tier.</p>
+  </section>
+
+  <section>
+    <h2>Detection Pipeline</h2>
+    <div class="tier-grid">
+      <div class="tier-card"><div class="num">T0</div><div class="lbl">Embedded Subtitle Match</div></div>
+      <div class="tier-card"><div class="num">T1</div><div class="lbl">Whisper STT Alignment</div></div>
+      <div class="tier-card"><div class="num">T2</div><div class="lbl">Sparse OCR Timeline</div></div>
+      <div class="tier-card"><div class="num">T3</div><div class="lbl">Dense OCR Confirmation</div></div>
+      <div class="tier-card"><div class="num">T4</div><div class="lbl">VLM Arbiter Fallback</div></div>
+    </div>
+    <p style="margin-top:1rem">VLM is only invoked when all cheaper methods fail or return confidence below 0.85.</p>
+  </section>
+
+  <section>
+    <h2>REST API</h2>
+    <div class="ep">
+      <span class="method post">POST</span>
+      <span class="path">/api/v1/jobs</span>
+      <span class="edesc">Submit a detection job — returns job_id immediately</span>
+    </div>
+    <div class="ep">
+      <span class="method get">GET</span>
+      <span class="path">/api/v1/jobs/{job_id}</span>
+      <span class="edesc">Poll status and retrieve full result</span>
+    </div>
+    <div class="ep">
+      <span class="method get">GET</span>
+      <span class="path">/api/v1/jobs/{job_id}/frame</span>
+      <span class="edesc">Download the detected frame as JPEG</span>
+    </div>
+    <h3>Example</h3>
+<pre>curl -X POST http://localhost:8000/api/v1/jobs \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ","target_text":"Never gonna give you up"}'</pre>
+<pre>{
+  "job_id": "job_4a2f1c8b3e",
+  "status": "completed",
+  "timestamp_seconds": 18.72,
+  "formatted_timestamp": "00:00:18.720",
+  "frame_number": 468,
+  "confidence_score": 0.94,
+  "tier_executed": "Tier 1: STT Acoustic Match",
+  "extracted_text": "Never gonna give you up"
+}</pre>
+  </section>
+
+  <section>
+    <h2>Technology Stack</h2>
+    <table>
+      <thead><tr><th>Component</th><th>Technology</th></tr></thead>
+      <tbody>
+        <tr><td>Backend API</td><td>FastAPI + Uvicorn</td></tr>
+        <tr><td>Speech Recognition</td><td>Groq Whisper / HuggingFace</td></tr>
+        <tr><td>Media Extraction</td><td>yt-dlp + FFmpeg</td></tr>
+        <tr><td>OCR</td><td>Mistral OCR (mistral-ocr-latest)</td></tr>
+        <tr><td>VLM Arbitration</td><td>Llama 3.2 Vision via NVIDIA NIM</td></tr>
+        <tr><td>Validation</td><td>Pydantic v2</td></tr>
+        <tr><td>Frontend</td><td>NiceGUI</td></tr>
+        <tr><td>Tests</td><td>Pytest (82 passing)</td></tr>
+        <tr><td>Container</td><td>Docker / Docker Compose</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Quick Start</h2>
+    <h3>Docker</h3>
+<pre>git clone https://github.com/your-username/Quest1.git
+cd Quest1 &amp;&amp; cp .env.example .env
+docker compose up --build</pre>
+    <h3>Local</h3>
+<pre>pip install -r requirements.txt
+uvicorn src.app:app --reload --port 8000
+python frontend.py</pre>
+  </section>
+
+</main>
+<footer>Quest1 &mdash; FastAPI &bull; NiceGUI &bull; Groq &bull; Mistral OCR &bull; NVIDIA NIM &mdash; <a href="https://github.com/your-username/Quest1">GitHub</a></footer>
+</body>
+</html>
