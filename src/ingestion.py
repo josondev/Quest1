@@ -94,6 +94,52 @@ class StreamIngestionService:
 
     parse_vtt_timestamp = _parse_vtt_timestamp
 
+    def _get_cookies_path(self) -> Optional[str]:
+        """
+        Download YouTube cookies file from Azure Blob Storage on first use.
+        Returns the local path to cookies.txt, or None if not configured.
+        Cookies are cached in temp_data/ for the lifetime of the container.
+        """
+        conn_str = settings.azure_storage_connection_string
+        blob_name = settings.yt_cookies_blob_name
+        container = settings.azure_blob_container
+
+        if not conn_str or not blob_name:
+            # No Azure storage configured — check if cookies.txt exists locally
+            local_cookies = Path("cookies.txt")
+            if local_cookies.exists():
+                logger.info("Using local cookies.txt")
+                return str(local_cookies)
+            return None
+
+        # Cache path — download once per container lifetime
+        cache_path = Path(settings.temp_storage_dir) / "yt_cookies.txt"
+
+        if cache_path.exists() and cache_path.stat().st_size > 0:
+            logger.info("Using cached cookies from %s", cache_path)
+            return str(cache_path)
+
+        try:
+            from azure.storage.blob import BlobServiceClient
+            service = BlobServiceClient.from_connection_string(conn_str)
+            client = service.get_container_client(container)
+            blob = client.get_blob_client(blob_name)
+
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(cache_path, "wb") as f:
+                f.write(blob.download_blob().readall())
+
+            logger.info(
+                "Downloaded cookies.txt from Blob → %s (%d bytes)",
+                cache_path,
+                cache_path.stat().st_size,
+            )
+            return str(cache_path)
+
+        except Exception as exc:
+            logger.warning("Failed to download cookies from Blob: %s", exc)
+            return None
+
     def probe_metadata(self, url_or_path: str, retries: int = 3, **kwargs) -> VideoMetadata:
 
         is_local = (
@@ -144,11 +190,14 @@ class StreamIngestionService:
         # ONLINE VIDEO
         # ==========================
 
+        cookies_path = self._get_cookies_path()
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
         }
+        if cookies_path:
+            ydl_opts["cookiefile"] = cookies_path
 
 
         for attempt in range(retries):
@@ -680,6 +729,7 @@ class StreamIngestionService:
                 logger.info("Standard manifest detected; attempting stream extraction.")
                 audio_url = url_or_path
         else:
+            cookies_path = self._get_cookies_path()
             ydl_opts = {
                 "quiet": True,
                 "no_warnings": True,
@@ -689,6 +739,8 @@ class StreamIngestionService:
                     "Referer": referer,
                 },
             }
+            if cookies_path:
+                ydl_opts["cookiefile"] = cookies_path
 
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:

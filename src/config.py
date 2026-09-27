@@ -137,6 +137,10 @@ class Settings(BaseSettings):
         default="quest1jobs",
         description="Azure Table Storage table name for job state"
     )
+    yt_cookies_blob_name: str = Field(
+        default="cookies.txt",
+        description="Blob name of the YouTube cookies file in the artifacts container"
+    )
 
     @property
     def artifacts_dir(self) -> Path:
