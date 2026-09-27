@@ -216,12 +216,12 @@ class StreamIngestionService:
             "skip_download": True,
         }
         
-        # YouTube-specific: Use Android client to bypass bot detection
+        # YouTube-specific: tv_embedded client + EJS (Deno) solves JS challenges
+        # Deno must be installed in PATH (see Dockerfile)
         if is_youtube:
             ydl_opts["extractor_args"] = {
                 "youtube": {
-                    "player_client": ["android"],
-                    "player_skip": ["webpage"],
+                    "player_client": ["tv_embedded"],
                 }
             }
         
@@ -559,12 +559,11 @@ class StreamIngestionService:
             "no_warnings": True,
         }
         
-        # YouTube-specific: Use Android client to bypass bot detection
+        # YouTube-specific: tv_embedded client + EJS (Deno) solves JS challenges
         if is_youtube:
             ydl_opts["extractor_args"] = {
                 "youtube": {
-                    "player_client": ["android"],
-                    "player_skip": ["webpage"],
+                    "player_client": ["tv_embedded"],
                 }
             }
         
@@ -699,12 +698,11 @@ class StreamIngestionService:
             "no_warnings": True,
         }
         
-        # YouTube-specific: Use Android client to bypass bot detection
+        # YouTube-specific: tv_embedded client + EJS (Deno) solves JS challenges
         if is_youtube:
             ydl_opts["extractor_args"] = {
                 "youtube": {
-                    "player_client": ["android"],
-                    "player_skip": ["webpage"],
+                    "player_client": ["tv_embedded"],
                 }
             }
         
@@ -801,12 +799,11 @@ class StreamIngestionService:
                 },
             }
             
-            # YouTube-specific: Use Android client to bypass bot detection
+            # YouTube-specific: tv_embedded client + EJS (Deno) solves JS challenges
             if is_youtube:
                 ydl_opts["extractor_args"] = {
                     "youtube": {
-                        "player_client": ["android"],
-                        "player_skip": ["webpage"],
+                        "player_client": ["tv_embedded"],
                     }
                 }
             

@@ -12,7 +12,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsm6 \
     libxext6 \
     curl \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Deno (required by yt-dlp EJS for YouTube JS challenge solving)
+RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
+ENV PATH="/usr/local/bin:${PATH}"
 
 WORKDIR /app
 

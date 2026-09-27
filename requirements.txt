@@ -13,7 +13,8 @@ openai>=1.0.0
 huggingface-hub>=0.22.0
 
 # Stream Ingestion & Metadata Probing
-yt-dlp>=2024.3.10
+# [default] includes yt-dlp-ejs (required for YouTube JS challenge solving)
+yt-dlp[default]>=2025.1.1
 
 # Image & Frame Processing
 opencv-python-headless>=4.9.0.80
