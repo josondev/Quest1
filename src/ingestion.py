@@ -110,18 +110,15 @@ class StreamIngestionService:
             if local_cookies.exists():
                 logger.info("Using local cookies.txt")
                 return str(local_cookies)
+            logger.warning("No cookies configured: AZURE_STORAGE_CONNECTION_STRING or YT_COOKIES_BLOB_NAME is missing")
             return None
 
-        # Always download fresh cookies on startup — never serve stale cache
         cache_path = Path(settings.temp_storage_dir) / "yt_cookies.txt"
 
-        # Delete stale cache if it exists so we always get fresh cookies from Blob
-        if cache_path.exists():
-            try:
-                cache_path.unlink()
-                logger.info("Removed stale cookies cache at %s", cache_path)
-            except Exception:
-                pass
+        # Only re-download if not cached (avoid hammering Blob on every request)
+        if cache_path.exists() and cache_path.stat().st_size > 0:
+            logger.info("Using cached cookies at %s (%d bytes)", cache_path, cache_path.stat().st_size)
+            return str(cache_path)
 
         try:
             from azure.storage.blob import BlobServiceClient
