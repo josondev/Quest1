@@ -62,15 +62,25 @@ class TestVLMArbiterService:
 
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
-        mock_response = MagicMock()
-        mock_response.choices[0].message.content = """{
+
+        # Each candidate gets its own call; C1 returns low confidence, C2 returns high confidence.
+        resp_c1 = MagicMock()
+        resp_c1.choices[0].message.content = """{
+            "selected_candidate_id": "C1",
+            "exact_detected_text": "",
+            "bounding_box": null,
+            "confidence_score": 0.2,
+            "reasoning": "Not found."
+        }"""
+        resp_c2 = MagicMock()
+        resp_c2.choices[0].message.content = """{
             "selected_candidate_id": "C2",
             "exact_detected_text": "My mind rebels at stagnation",
             "bounding_box": {"ymin": 0.75, "xmin": 0.1, "ymax": 0.95, "xmax": 0.9},
             "confidence_score": 0.95,
             "reasoning": "Subtitles clearly present in lower region."
         }"""
-        mock_client.chat.completions.create.return_value = mock_response
+        mock_client.chat.completions.create.side_effect = [resp_c1, resp_c2]
 
         service = VLMArbiterService(api_key="mock_key")
         candidates = [
@@ -110,14 +120,24 @@ class TestVLMArbiterService:
         ]
         service.evaluate_candidates("target phrase", candidates)
 
-        call_args = mock_client.chat.completions.create.call_args
-        messages = call_args.kwargs["messages"]
-        user_content = messages[1]["content"]
+        # With per-candidate loop, each candidate gets its own call.
+        assert mock_client.chat.completions.create.call_count == 2
 
-        # Ensure both candidate IDs and target text are in payload
-        assert 'Target Dialogue to locate: "target phrase"' in user_content[0]["text"]
-        assert "\nCandidate ID: C1:" in user_content[1]["text"]
-        assert "\nCandidate ID: C2:" in user_content[3]["text"]
+        # Inspect the first call (C1) and second call (C2).
+        call_c1 = mock_client.chat.completions.create.call_args_list[0]
+        call_c2 = mock_client.chat.completions.create.call_args_list[1]
+
+        messages_c1 = call_c1.kwargs["messages"]
+        user_content_c1 = messages_c1[1]["content"]
+        assert 'Target Dialogue to locate: "target phrase"' in user_content_c1[0]["text"]
+        assert "Candidate ID: C1" in user_content_c1[0]["text"]
+        assert user_content_c1[1]["type"] == "image_url"
+
+        messages_c2 = call_c2.kwargs["messages"]
+        user_content_c2 = messages_c2[1]["content"]
+        assert 'Target Dialogue to locate: "target phrase"' in user_content_c2[0]["text"]
+        assert "Candidate ID: C2" in user_content_c2[0]["text"]
+        assert user_content_c2[1]["type"] == "image_url"
 
     @patch("src.fallback_vlm.OpenAI")
     def test_evaluate_candidates_rejects_unbounded_confidence(self, mock_openai_cls, tmp_path):
@@ -137,8 +157,10 @@ class TestVLMArbiterService:
 
         service = VLMArbiterService(api_key="mock_key")
         candidates = [CandidateFrame(candidate_id="C1", timestamp_seconds=5.0, frame_number=120, image_path=str(f1))]
-        with pytest.raises(VLMError, match="invalid confidence_score: 17.0"):
-            service.evaluate_candidates("target", candidates)
+        # Out-of-range confidence is skipped; no valid candidate → returns NONE
+        decision = service.evaluate_candidates("target", candidates)
+        assert decision.selected_candidate_id == "NONE"
+        assert decision.confidence_score == 0.0
 
     @patch("src.fallback_vlm.OpenAI")
     def test_evaluate_candidates_rejects_missing_required_fields(self, mock_openai_cls, tmp_path):
@@ -156,8 +178,10 @@ class TestVLMArbiterService:
 
         service = VLMArbiterService(api_key="mock_key")
         candidates = [CandidateFrame(candidate_id="C1", timestamp_seconds=5.0, frame_number=120, image_path=str(f1))]
-        with pytest.raises(VLMError, match="missing required field 'exact_detected_text'"):
-            service.evaluate_candidates("target", candidates)
+        # Missing required field is skipped; no valid candidate → returns NONE
+        decision = service.evaluate_candidates("target", candidates)
+        assert decision.selected_candidate_id == "NONE"
+        assert decision.confidence_score == 0.0
 
     @patch("src.fallback_vlm.OpenAI")
     def test_evaluate_candidates_accepts_none_selection(self, mock_openai_cls, tmp_path):
@@ -198,8 +222,10 @@ class TestVLMArbiterService:
 
         service = VLMArbiterService(api_key="mock_key")
         candidates = [CandidateFrame(candidate_id="C1", timestamp_seconds=5.0, frame_number=120, image_path=str(f1))]
-        with pytest.raises(VLMError, match="which was not among the candidates provided"):
-            service.evaluate_candidates("target phrase", candidates)
+        # Hallucinated ID is overridden to the actual candidate ID; match succeeds.
+        decision = service.evaluate_candidates("target phrase", candidates)
+        assert decision.selected_candidate_id == "C1"
+        assert decision.confidence_score == 0.9
 
     @patch("src.fallback_vlm.OpenAI")
     def test_evaluate_candidates_rejects_malformed_json(self, mock_openai_cls, tmp_path):
@@ -214,8 +240,10 @@ class TestVLMArbiterService:
 
         service = VLMArbiterService(api_key="mock_key")
         candidates = [CandidateFrame(candidate_id="C1", timestamp_seconds=5.0, frame_number=120, image_path=str(f1))]
-        with pytest.raises(VLMError, match="not valid JSON"):
-            service.evaluate_candidates("target phrase", candidates)
+        # Malformed JSON is skipped; no valid candidate → returns NONE
+        decision = service.evaluate_candidates("target phrase", candidates)
+        assert decision.selected_candidate_id == "NONE"
+        assert decision.confidence_score == 0.0
 
     @patch("src.fallback_vlm.OpenAI")
     def test_evaluate_candidates_handles_provider_exception(self, mock_openai_cls, tmp_path):

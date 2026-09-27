@@ -121,101 +121,109 @@ class VLMArbiterService:
         if len(cand_ids) != len(set(cand_ids)):
             raise VLMError("Candidate IDs provided for VLM evaluation must be unique")
 
-        user_prompt = (
-            f'Target Dialogue to locate: "{target_text}"\n'
-            "Return strictly JSON with keys: selected_candidate_id, exact_detected_text, confidence_score, reasoning, bounding_box."
-        )
+        # NVIDIA NIM and most vision models support only 1 image per prompt.
+        # Evaluate each candidate individually and pick the highest confidence match.
+        best_decision: Optional[VLMDecision] = None
 
-        content_items = [{"type": "text", "text": user_prompt}]
         for cand in candidates:
+            user_prompt = (
+                f'Target Dialogue to locate: "{target_text}"\n'
+                f"Candidate ID: {cand.candidate_id}\n"
+                "Does this frame contain the target dialogue as visible text? "
+                "Return strictly JSON with keys: selected_candidate_id (use the candidate ID if found, else 'NONE'), "
+                "exact_detected_text, confidence_score (0.0-1.0), reasoning, bounding_box (null if unknown)."
+            )
+
             b64_str, mime_type = encode_image_to_base64(cand.image_path)
-            content_items.append({
-                "type": "text",
-                "text": f"\nCandidate ID: {cand.candidate_id}:"
-            })
-            content_items.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:{mime_type};base64,{b64_str}"}
-            })
 
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a Vision-Language Model analyzer evaluating candidate video frames.",
-            },
-            {
-                "role": "user",
-                "content": content_items,
-            },
-        ]
+            content_items = [
+                {"type": "text", "text": user_prompt},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime_type};base64,{b64_str}"},
+                },
+            ]
 
-        try:
-            response = client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=0.0,
-            )
-        except Exception as exc:
-            raise VLMError(f"VLM decision processing failed: {exc}") from exc
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are a Vision-Language Model analyzer evaluating video frames for visible dialogue text.",
+                },
+                {
+                    "role": "user",
+                    "content": content_items,
+                },
+            ]
 
-        try:
-            raw_content = response.choices[0].message.content or ""
-            json_match = re.search(r"\{.*\}", raw_content, re.DOTALL)
-            if not json_match:
-                raise VLMError("Response is not valid JSON")
-            data = json.loads(json_match.group(0))
-        except Exception as exc:
-            if isinstance(exc, VLMError):
-                raise
-            raise VLMError("Response is not valid JSON") from exc
-
-        required_fields = ["selected_candidate_id", "exact_detected_text", "confidence_score"]
-        for field in required_fields:
-            if field not in data:
-                raise VLMError(f"missing required field '{field}'")
-
-        selected_id = str(data["selected_candidate_id"])
-        detected_text = str(data["exact_detected_text"])
-
-        try:
-            conf_score = float(data["confidence_score"])
-        except (TypeError, ValueError):
-            raise VLMError("Response is not valid JSON")
-
-        if conf_score < 0.0 or conf_score > 1.0:
-            raise VLMError(f"invalid confidence_score: {conf_score}")
-
-        if selected_id != "NONE" and selected_id not in cand_ids:
-            raise VLMError(
-                f"Candidate ID {selected_id} which was not among the candidates provided"
-            )
-
-        bbox_data = data.get("bounding_box")
-        bbox = None
-        if isinstance(bbox_data, dict):
             try:
-                bbox = BoundingBox(
-                    ymin=float(bbox_data["ymin"]),
-                    xmin=float(bbox_data["xmin"]),
-                    ymax=float(bbox_data["ymax"]),
-                    xmax=float(bbox_data["xmax"]),
+                response = client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=0.0,
                 )
-            except (KeyError, ValueError, TypeError):
-                bbox = None
+            except Exception as exc:
+                raise VLMError(f"VLM decision processing failed: {exc}") from exc
 
-        if selected_id == "NONE":
-            return VLMDecision(
-                selected_candidate_id="NONE",
-                exact_detected_text="",
-                confidence_score=0.0,
-                reasoning=data.get("reasoning", "No matching candidate found."),
+            # Parse this candidate's response
+            try:
+                raw_content = response.choices[0].message.content or ""
+                json_match = re.search(r"\{.*\}", raw_content, re.DOTALL)
+                if not json_match:
+                    continue
+                data = json.loads(json_match.group(0))
+            except Exception:
+                continue
+
+            required_fields = ["selected_candidate_id", "exact_detected_text", "confidence_score"]
+            if not all(f in data for f in required_fields):
+                continue
+
+            selected_id = str(data["selected_candidate_id"])
+            if selected_id == "NONE":
+                continue
+
+            try:
+                conf_score = float(data["confidence_score"])
+            except (TypeError, ValueError):
+                continue
+
+            if conf_score < 0.0 or conf_score > 1.0:
+                continue
+
+            # Override candidate id to match what was sent (model may echo it)
+            data["selected_candidate_id"] = cand.candidate_id
+
+            bbox_data = data.get("bounding_box")
+            bbox = None
+            if isinstance(bbox_data, dict):
+                try:
+                    bbox = BoundingBox(
+                        ymin=float(bbox_data["ymin"]),
+                        xmin=float(bbox_data["xmin"]),
+                        ymax=float(bbox_data["ymax"]),
+                        xmax=float(bbox_data["xmax"]),
+                    )
+                except (KeyError, ValueError, TypeError):
+                    bbox = None
+
+            decision = VLMDecision(
+                selected_candidate_id=cand.candidate_id,
+                exact_detected_text=str(data.get("exact_detected_text", "")),
+                confidence_score=conf_score,
+                reasoning=data.get("reasoning"),
                 bounding_box=bbox,
             )
 
+            if best_decision is None or conf_score > best_decision.confidence_score:
+                best_decision = decision
+
+        # Return best match found, or NONE if nothing passed
+        if best_decision is not None:
+            return best_decision
+
         return VLMDecision(
-            selected_candidate_id=selected_id,
-            exact_detected_text=detected_text,
-            confidence_score=conf_score,
-            reasoning=data.get("reasoning"),
-            bounding_box=bbox,
+            selected_candidate_id="NONE",
+            exact_detected_text="",
+            confidence_score=0.0,
+            reasoning="No candidate contained the target dialogue.",
         )
