@@ -209,6 +209,8 @@ class StreamIngestionService:
         }
         if cookies_path:
             ydl_opts["cookiefile"] = cookies_path
+        if settings.yt_dlp_proxy:
+            ydl_opts["proxy"] = settings.yt_dlp_proxy
 
 
         for attempt in range(retries):
@@ -536,6 +538,8 @@ class StreamIngestionService:
             "quiet": True,
             "no_warnings": True,
         }
+        if settings.yt_dlp_proxy:
+            ydl_opts["proxy"] = settings.yt_dlp_proxy
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -662,6 +666,8 @@ class StreamIngestionService:
             "quiet": True,
             "no_warnings": True,
         }
+        if settings.yt_dlp_proxy:
+            ydl_opts["proxy"] = settings.yt_dlp_proxy
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -752,6 +758,8 @@ class StreamIngestionService:
             }
             if cookies_path:
                 ydl_opts["cookiefile"] = cookies_path
+            if settings.yt_dlp_proxy:
+                ydl_opts["proxy"] = settings.yt_dlp_proxy
 
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
