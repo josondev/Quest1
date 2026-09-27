@@ -1,29 +1,40 @@
 FROM python:3.11-slim
 
-# Prevent Python from writing .pyc files and buffer stdout/stderr for real-time logging
+# Prevent Python from writing .pyc files and buffer stdout/stderr
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Install system dependencies required by OpenCV matrix operations and FFmpeg audio stream processing
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libgl1 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Leverage Docker layer caching by installing dependencies before copying application code
+# Install dependencies before copying code (layer cache)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source repository and pre-create persistent artifact & temporary storage directories
+# Copy source
 COPY . .
+
+# Pre-create storage directories
 RUN mkdir -p /app/artifacts /app/temp_data
+
+# Non-root user for security
+RUN adduser --disabled-password --gecos "" appuser \
+    && chown -R appuser:appuser /app
+USER appuser
 
 EXPOSE 8000
 
-# Execute Uvicorn ASGI server bound to all network interfaces
+# Health check — Azure Container Apps uses this to know the app is ready
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
 CMD ["uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "8000"]

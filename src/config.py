@@ -121,6 +121,23 @@ class Settings(BaseSettings):
     api_host: str = Field(default="0.0.0.0", description="FastAPI host")
     api_port: int = Field(default=8000, description="FastAPI port")
 
+    # ==========================================
+    # Azure Storage (production)
+    # Leave blank for local development
+    # ==========================================
+    azure_storage_connection_string: str = Field(
+        default="",
+        description="Azure Storage Account connection string"
+    )
+    azure_blob_container: str = Field(
+        default="quest1-artifacts",
+        description="Azure Blob container name for frame artifacts"
+    )
+    azure_table_name: str = Field(
+        default="quest1jobs",
+        description="Azure Table Storage table name for job state"
+    )
+
     @property
     def artifacts_dir(self) -> Path:
         """Alias helper for artifact storage directory compatibility."""

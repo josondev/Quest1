@@ -3,13 +3,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from src.app import JOBS_DB, app
+from src.app import job_store, app
 from src.models.schemas import DetectionResult, JobStatus, TierType
 
 
 @pytest.fixture
 def client():
-    JOBS_DB.clear()
+    job_store.clear()
     return TestClient(app)
 
 
@@ -38,13 +38,13 @@ class TestFastAPIEndpoints:
 
     def test_get_job_status_success(self, client):
         job_id = "job_test_123"
-        JOBS_DB[job_id] = DetectionResult(
+        job_store.put(job_id, DetectionResult(
             job_id=job_id,
             status=JobStatus.COMPLETED,
             target_dialogue="sample text",
             timestamp_seconds=12.5,
             tier_executed=TierType.TIER_0_SUBTITLE,
-        )
+        ))
 
         response = client.get(f"/api/v1/jobs/{job_id}")
         assert response.status_code == 200
@@ -61,12 +61,12 @@ class TestFastAPIEndpoints:
         frame_file.write_bytes(b"FAKE_JPEG_BINARY")
 
         job_id = "job_frame_123"
-        JOBS_DB[job_id] = DetectionResult(
+        job_store.put(job_id, DetectionResult(
             job_id=job_id,
             status=JobStatus.COMPLETED,
             target_dialogue="sample text",
             frame_image_path=str(frame_file),
-        )
+        ))
 
         response = client.get(f"/api/v1/jobs/{job_id}/frame")
         assert response.status_code == 200
@@ -75,12 +75,12 @@ class TestFastAPIEndpoints:
 
     def test_get_job_frame_missing_artifact(self, client):
         job_id = "job_no_artifact"
-        JOBS_DB[job_id] = DetectionResult(
+        job_store.put(job_id, DetectionResult(
             job_id=job_id,
             status=JobStatus.COMPLETED,
             target_dialogue="sample text",
             frame_image_path=None,
-        )
+        ))
 
         response = client.get(f"/api/v1/jobs/{job_id}/frame")
         assert response.status_code == 400

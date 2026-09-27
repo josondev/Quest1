@@ -20,6 +20,8 @@ opencv-python-headless>=4.9.0.80
 pillow>=10.2.0
 numpy>=1.26.0
 requests
+azure-data-tables==12.5.0
+azure-storage-blob==12.20.0
 
 
 # Fuzzy String Alignment

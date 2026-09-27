@@ -1,12 +1,10 @@
-name: CI/CD Pipeline & GitHub Pages
+name: CI/CD — Test · Build · Deploy
 
 on:
   push:
-    branches:
-      - Rex
+    branches: [Rex]
   pull_request:
-    branches:
-      - Rex
+    branches: [Rex]
   workflow_dispatch:
 
 permissions:
@@ -15,57 +13,119 @@ permissions:
   id-token: write
 
 concurrency:
-  group: "pages"
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: quest1registry001.azurecr.io
+  IMAGE_NAME: quest1
+  RESOURCE_GROUP: quest1-rg
+  API_APP_NAME: quest1-api
+  UI_APP_NAME: quest1-ui
 
 jobs:
+  # ─────────────────────────────────────────────
+  # JOB 1 — Run full test suite
+  # Blocks everything downstream if tests fail
+  # ─────────────────────────────────────────────
   test:
-    name: Run Pytest Suite
+    name: Run 82 Pytest Tests
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install System Dependencies (FFmpeg)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
+      - name: Install system deps (FFmpeg)
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
-      - name: Install Python Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+      - name: Install Python deps
+        run: pip install -r requirements.txt
 
-      - name: Execute Test Suite
-        run: pytest
+      - name: Run test suite
+        run: pytest --tb=short -q
 
-  deploy-pages:
-    name: Deploy GitHub Pages Showcase
+  # ─────────────────────────────────────────────
+  # JOB 2 — Build Docker image + push to ACR
+  # Only runs on Rex branch push, after tests pass
+  # ─────────────────────────────────────────────
+  build-push:
+    name: Build & Push to ACR
     needs: test
-    if: github.ref == 'refs/heads/Rex'
+    if: github.ref == 'refs/heads/Rex' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Azure Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+  # ─────────────────────────────────────────────
+  # JOB 3 — Deploy to Azure Container Apps
+  # Only runs after image is pushed
+  # ─────────────────────────────────────────────
+  deploy:
+    name: Deploy to Azure Container Apps
+    needs: build-push
+    if: github.ref == 'refs/heads/Rex' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy API container
+        run: |
+          az containerapp update \
+            --name ${{ env.API_APP_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      - name: Deploy UI container
+        run: |
+          az containerapp update \
+            --name ${{ env.UI_APP_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+  # ─────────────────────────────────────────────
+  # JOB 4 — Deploy GitHub Pages showcase
+  # ─────────────────────────────────────────────
+  deploy-pages:
+    name: Deploy GitHub Pages
+    needs: test
+    if: github.ref == 'refs/heads/Rex' && github.event_name == 'push'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup GitHub Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload docs/ as Pages artifact
-        uses: actions/upload-pages-artifact@v3
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
         with:
-          path: 'docs'
-
-      - name: Deploy to GitHub Pages
-        id: deployment
+          path: docs
+      - id: deployment
         uses: actions/deploy-pages@v4

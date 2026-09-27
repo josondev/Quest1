@@ -1,7 +1,6 @@
 import uuid
 import logging
 from pathlib import Path
-from typing import Dict
 
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -15,6 +14,7 @@ from src.models.schemas import (
     JobStatus,
 )
 from src.pipeline import PipelineOrchestrator
+from src.storage import JobStore, ArtifactStore
 
 
 logger = logging.getLogger(__name__)
@@ -76,7 +76,15 @@ app.mount(
 # STORAGE
 # ============================================================
 
-JOBS_DB: Dict[str, DetectionResult] = {}
+job_store = JobStore(
+    connection_string=settings.azure_storage_connection_string or None,
+    table_name=settings.azure_table_name,
+)
+artifact_store = ArtifactStore(
+    connection_string=settings.azure_storage_connection_string or None,
+    container_name=settings.azure_blob_container,
+    local_artifacts_dir=artifacts_dir,
+)
 
 orchestrator = PipelineOrchestrator()
 
@@ -125,13 +133,21 @@ def _execute_pipeline_background(
                 )
 
 
+        # Upload frame to Blob Storage if available
+        if result.frame_image_path:
+            local_frame = Path(result.frame_image_path) if not result.frame_image_path.startswith("http") else None
+            if local_frame and local_frame.exists():
+                blob_url = artifact_store.upload_frame(local_frame, job_id)
+                result = result.model_copy(update={"frame_image_path": blob_url})
+
+
         logger.info(
             "FINAL RESULT STORED: %s",
             result.model_dump()
         )
 
 
-        JOBS_DB[job_id] = result
+        job_store.put(job_id, result)
 
 
         logger.info(
@@ -148,12 +164,12 @@ def _execute_pipeline_background(
         )
 
 
-        JOBS_DB[job_id] = DetectionResult(
+        job_store.put(job_id, DetectionResult(
             job_id=job_id,
             status=JobStatus.FAILED,
             target_dialogue=request.target_text,
             error_message=str(exc),
-        )
+        ))
 
 
 
@@ -175,11 +191,11 @@ async def create_detection_job(
     )
 
 
-    JOBS_DB[job_id] = DetectionResult(
+    job_store.put(job_id, DetectionResult(
         job_id=job_id,
         status=JobStatus.PROCESSING,
         target_dialogue=request.target_text,
-    )
+    ))
 
 
     background_tasks.add_task(
@@ -209,7 +225,7 @@ async def get_job_status(
     job_id: str,
 ):
 
-    if job_id not in JOBS_DB:
+    if job_id not in job_store:
 
         raise HTTPException(
             status_code=404,
@@ -217,7 +233,7 @@ async def get_job_status(
         )
 
 
-    result = JOBS_DB[job_id]
+    result = job_store[job_id]
 
 
     logger.info(
@@ -241,7 +257,7 @@ async def get_job_frame(
     job_id: str,
 ):
 
-    if job_id not in JOBS_DB:
+    if job_id not in job_store:
 
         raise HTTPException(
             status_code=404,
@@ -249,7 +265,7 @@ async def get_job_frame(
         )
 
 
-    job = JOBS_DB[job_id]
+    job = job_store[job_id]
 
 
     if not job.frame_image_path:
@@ -300,3 +316,12 @@ async def get_job_frame(
         frame_path,
         media_type="image/jpeg",
     )
+
+
+# ============================================================
+# HEALTH CHECK
+# ============================================================
+
+@app.get("/health", include_in_schema=False)
+async def health_check():
+    return {"status": "ok", "service": "quest1-api"}
