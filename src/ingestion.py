@@ -115,17 +115,23 @@ class StreamIngestionService:
 
         cache_path = Path(settings.temp_storage_dir) / "yt_cookies.txt"
 
-        # Only re-download if not cached (avoid hammering Blob on every request)
-        if cache_path.exists() and cache_path.stat().st_size > 0:
-            logger.info("Using cached cookies at %s (%d bytes)", cache_path, cache_path.stat().st_size)
-            return str(cache_path)
-
+        # Only re-download if not cached with the correct size
+        # Use blob size check to detect truncated/corrupt cache
         try:
             from azure.storage.blob import BlobServiceClient
             service = BlobServiceClient.from_connection_string(conn_str)
             client = service.get_container_client(container)
             blob = client.get_blob_client(blob_name)
 
+            # Get expected size from blob properties
+            blob_size = blob.get_blob_properties().size
+
+            # Re-use cache only if it exists AND matches blob size exactly
+            if cache_path.exists() and cache_path.stat().st_size == blob_size:
+                logger.info("Using cached cookies at %s (%d bytes)", cache_path, cache_path.stat().st_size)
+                return str(cache_path)
+
+            # Download fresh copy
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             with open(cache_path, "wb") as f:
                 f.write(blob.download_blob().readall())
@@ -139,6 +145,10 @@ class StreamIngestionService:
 
         except Exception as exc:
             logger.warning("Failed to download cookies from Blob: %s", exc)
+            # Fall back to existing cache if available
+            if cache_path.exists() and cache_path.stat().st_size > 0:
+                logger.info("Falling back to existing cache at %s", cache_path)
+                return str(cache_path)
             return None
 
     def probe_metadata(self, url_or_path: str, retries: int = 3, **kwargs) -> VideoMetadata:
