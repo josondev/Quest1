@@ -7,8 +7,8 @@ Two backends are supported:
 - Azure (when AZURE_STORAGE_CONNECTION_STRING is set in env)
 - Local in-memory / disk fallback (for local development and tests)
 
-JobStore     → Azure Table Storage  (replaces in-memory JOBS_DB dict)
-ArtifactStore → Azure Blob Storage  (replaces local artifacts/ disk writes)
+JobStore     â†’ Azure Table Storage  (replaces in-memory JOBS_DB dict)
+ArtifactStore â†’ Azure Blob Storage  (replaces local artifacts/ disk writes)
 """
 
 from __future__ import annotations
@@ -22,13 +22,18 @@ from src.models.schemas import DetectionResult, JobStatus
 
 logger = logging.getLogger(__name__)
 
-# ─────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # HELPERS
-# ─────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _result_to_entity(result: DetectionResult) -> dict:
-    """Flatten a DetectionResult into a flat dict safe for Table Storage."""
-    data = result.model_dump()
+    """Flatten a DetectionResult into a flat dict safe for Table Storage.
+
+    Uses model_dump(mode="json") so enum values are serialised as their
+    string values (e.g. "completed") not their Python reprs ("JobStatus.COMPLETED").
+    """
+    # mode="json" coerces enums → .value, Paths → str, etc.
+    data = result.model_dump(mode="json")
     flat: dict = {"PartitionKey": "jobs", "RowKey": result.job_id}
     for k, v in data.items():
         if v is None:
@@ -59,9 +64,9 @@ def _entity_to_result(entity: dict) -> DetectionResult:
     return DetectionResult(**{k: v for k, v in data.items() if v is not None})
 
 
-# ─────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # JOB STORE
-# ─────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class JobStore:
     """
@@ -90,18 +95,18 @@ class JobStore:
                     self._client.create_table()
                     logger.info("Table Storage: created table '%s'", table_name)
                 except Exception:
-                    # Table already exists — normal
+                    # Table already exists â€” normal
                     pass
                 logger.info("JobStore: using Azure Table Storage (%s)", table_name)
             except Exception as exc:
                 logger.warning(
-                    "JobStore: Azure Table init failed (%s) — falling back to in-memory", exc
+                    "JobStore: Azure Table init failed (%s) â€” falling back to in-memory", exc
                 )
                 self._client = None
         else:
-            logger.info("JobStore: no connection string — using in-memory store")
+            logger.info("JobStore: no connection string â€” using in-memory store")
 
-    # ── public API ──────────────────────────────────────────
+    # â”€â”€ public API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def put(self, job_id: str, result: DetectionResult) -> None:
         """Upsert a job result."""
@@ -111,7 +116,7 @@ class JobStore:
                 self._client.upsert_entity(entity)
                 return
             except Exception as exc:
-                logger.warning("JobStore.put Azure failed (%s) — using local", exc)
+                logger.warning("JobStore.put Azure failed (%s) â€” using local", exc)
         self._local[job_id] = result
 
     def get(self, job_id: str) -> Optional[DetectionResult]:
@@ -123,17 +128,17 @@ class JobStore:
                 )
                 return _entity_to_result(dict(entity))
             except Exception as exc:
-                logger.warning("JobStore.get Azure failed (%s) — using local", exc)
+                logger.warning("JobStore.get Azure failed (%s) â€” using local", exc)
         return self._local.get(job_id)
 
     def exists(self, job_id: str) -> bool:
         return self.get(job_id) is not None
 
     def clear(self) -> None:
-        """Clear in-memory store — used by tests only."""
+        """Clear in-memory store â€” used by tests only."""
         self._local.clear()
 
-    # ── dict-like interface so existing code using JOBS_DB still works ──
+    # â”€â”€ dict-like interface so existing code using JOBS_DB still works â”€â”€
 
     def __contains__(self, job_id: str) -> bool:
         return self.exists(job_id)
@@ -148,9 +153,9 @@ class JobStore:
         return result
 
 
-# ─────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # ARTIFACT STORE
-# ─────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class ArtifactStore:
     """
@@ -189,13 +194,13 @@ class ArtifactStore:
                 )
             except Exception as exc:
                 logger.warning(
-                    "ArtifactStore: Azure Blob init failed (%s) — using local disk", exc
+                    "ArtifactStore: Azure Blob init failed (%s) â€” using local disk", exc
                 )
                 self._client = None
         else:
-            logger.info("ArtifactStore: no connection string — using local disk")
+            logger.info("ArtifactStore: no connection string â€” using local disk")
 
-    # ── public API ──────────────────────────────────────────
+    # â”€â”€ public API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def upload_frame(self, local_path: Path, job_id: str) -> str:
         """
@@ -217,11 +222,11 @@ class ArtifactStore:
                         content_settings=self._jpeg_content_settings(),
                     )
                 url = f"{self._client.url}/{blob_name}"
-                logger.info("ArtifactStore: uploaded %s → %s", local_path.name, url)
+                logger.info("ArtifactStore: uploaded %s â†’ %s", local_path.name, url)
                 return url
             except Exception as exc:
                 logger.warning(
-                    "ArtifactStore.upload_frame Azure failed (%s) — using local path", exc
+                    "ArtifactStore.upload_frame Azure failed (%s) â€” using local path", exc
                 )
 
         return str(local_path)
