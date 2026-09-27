@@ -206,11 +206,25 @@ class StreamIngestionService:
         # ==========================
 
         cookies_path = self._get_cookies_path()
+        
+        # Check if this is a YouTube URL to apply special handling
+        is_youtube = "youtube.com" in url_or_path or "youtu.be" in url_or_path
+        
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
         }
+        
+        # YouTube-specific: Use Android client to bypass bot detection
+        if is_youtube:
+            ydl_opts["extractor_args"] = {
+                "youtube": {
+                    "player_client": ["android"],
+                    "player_skip": ["webpage"],
+                }
+            }
+        
         if cookies_path:
             ydl_opts["cookiefile"] = cookies_path
         if settings.yt_dlp_proxy:
@@ -537,11 +551,23 @@ class StreamIngestionService:
         if not target_url.startswith("http") and Path(target_url).exists():
             return (None, False, "en")
 
+        is_youtube = "youtube.com" in target_url or "youtu.be" in target_url
+        
         ydl_opts = {
             "skip_download": True,
             "quiet": True,
             "no_warnings": True,
         }
+        
+        # YouTube-specific: Use Android client to bypass bot detection
+        if is_youtube:
+            ydl_opts["extractor_args"] = {
+                "youtube": {
+                    "player_client": ["android"],
+                    "player_skip": ["webpage"],
+                }
+            }
+        
         if settings.yt_dlp_proxy:
             ydl_opts["proxy"] = settings.yt_dlp_proxy
 
@@ -664,12 +690,24 @@ class StreamIngestionService:
         if output_mp4.exists() and output_mp4.stat().st_size > 0:
             return output_mp4
 
+        is_youtube = "youtube.com" in url or "youtu.be" in url
+        
         ydl_opts = {
             "format": "worstvideo[ext=mp4]+worstaudio[ext=m4a]/worst[ext=mp4]/worst",
             "outtmpl": str(output_mp4),
             "quiet": True,
             "no_warnings": True,
         }
+        
+        # YouTube-specific: Use Android client to bypass bot detection
+        if is_youtube:
+            ydl_opts["extractor_args"] = {
+                "youtube": {
+                    "player_client": ["android"],
+                    "player_skip": ["webpage"],
+                }
+            }
+        
         if settings.yt_dlp_proxy:
             ydl_opts["proxy"] = settings.yt_dlp_proxy
 
@@ -751,6 +789,8 @@ class StreamIngestionService:
                 audio_url = url_or_path
         else:
             cookies_path = self._get_cookies_path()
+            is_youtube = "youtube.com" in url_or_path or "youtu.be" in url_or_path
+            
             ydl_opts = {
                 "quiet": True,
                 "no_warnings": True,
@@ -760,6 +800,16 @@ class StreamIngestionService:
                     "Referer": referer,
                 },
             }
+            
+            # YouTube-specific: Use Android client to bypass bot detection
+            if is_youtube:
+                ydl_opts["extractor_args"] = {
+                    "youtube": {
+                        "player_client": ["android"],
+                        "player_skip": ["webpage"],
+                    }
+                }
+            
             if cookies_path:
                 ydl_opts["cookiefile"] = cookies_path
             if settings.yt_dlp_proxy:
