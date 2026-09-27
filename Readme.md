@@ -506,6 +506,24 @@ Example:
 MODEL_PROVIDER_API_KEY=<your_key>
 ```
 
+### Proxy Configuration (Recommended for YouTube)
+
+To avoid bot detection when scraping YouTube playlists, configure a proxy service. We recommend **Bright Data** for the best free tier:
+
+- 15 datacenter IPs
+- 2 GB monthly traffic
+- Better IP reputation than other free providers
+
+**See detailed setup guide:** [docs/brightdata-setup.md](docs/brightdata-setup.md)
+
+Quick setup:
+1. Sign up at [Bright Data](https://brightdata.com/)
+2. Create a Datacenter proxy zone
+3. Add credentials to `.env`:
+   ```env
+   YT_DLP_PROXY=http://your-username:your-password@brd.superproxy.io:22225
+   ```
+
 ---
 
 # Running My project
