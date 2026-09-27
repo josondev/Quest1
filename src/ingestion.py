@@ -112,12 +112,16 @@ class StreamIngestionService:
                 return str(local_cookies)
             return None
 
-        # Cache path — download once per container lifetime
+        # Always download fresh cookies on startup — never serve stale cache
         cache_path = Path(settings.temp_storage_dir) / "yt_cookies.txt"
 
-        if cache_path.exists() and cache_path.stat().st_size > 0:
-            logger.info("Using cached cookies from %s", cache_path)
-            return str(cache_path)
+        # Delete stale cache if it exists so we always get fresh cookies from Blob
+        if cache_path.exists():
+            try:
+                cache_path.unlink()
+                logger.info("Removed stale cookies cache at %s", cache_path)
+            except Exception:
+                pass
 
         try:
             from azure.storage.blob import BlobServiceClient
