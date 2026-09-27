@@ -142,10 +142,21 @@ class StreamIngestionService:
 
     def probe_metadata(self, url_or_path: str, retries: int = 3, **kwargs) -> VideoMetadata:
 
+        # Direct media file extensions that yt-dlp can't parse format streams from
+        _DIRECT_MEDIA_EXTS = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".flv"}
+
+        _is_direct_file_url = (
+            url_or_path.startswith("http")
+            and any(
+                url_or_path.lower().split("?")[0].endswith(ext)
+                for ext in _DIRECT_MEDIA_EXTS
+            )
+        )
+
         is_local = (
             not url_or_path.startswith("http")
             and Path(url_or_path).exists()
-        )
+        ) or _is_direct_file_url
 
         # ==========================
         # LOCAL VIDEO
@@ -153,13 +164,13 @@ class StreamIngestionService:
 
         if is_local:
 
-            cap = cv2.VideoCapture(str(url_or_path))
+            cap = cv2.VideoCapture(url_or_path if _is_direct_file_url else str(url_or_path))
 
             try:
 
                 if not cap.isOpened():
                     raise IngestionError(
-                        f"Unable to open local video file: {url_or_path}"
+                        f"Unable to open video source: {url_or_path}"
                     )
 
                 fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
@@ -178,7 +189,7 @@ class StreamIngestionService:
                     fps=float(fps),
                     total_frames=int(frames),
                     has_subtitles=False,
-                    is_local=True,
+                    is_local=not _is_direct_file_url,
                     stream_path=str(url_or_path),
                 )
 

@@ -252,7 +252,7 @@ Hello world
         mock_cap.isOpened.return_value = False
 
         service = StreamIngestionService()
-        with pytest.raises(IngestionError, match="Unable to open local video file"):
+        with pytest.raises(IngestionError, match="Unable to open video source"):
             service.probe_metadata(str(local_file))
         mock_cap.release.assert_called_once()
 
