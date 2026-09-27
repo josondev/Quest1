@@ -9,3 +9,5 @@ artifacts/*
 !artifacts/.gitkeep
 temp_data/*
 !temp_data/.gitkeep
+cookies.txt
+cookies_from_blob.txt

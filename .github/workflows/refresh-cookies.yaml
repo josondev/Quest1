@@ -1,0 +1,53 @@
+name: Refresh YouTube Cookies
+
+# Triggers automatically when cookies.txt is pushed to Rex branch
+on:
+  push:
+    branches: [Rex]
+    paths:
+      - cookies.txt
+  workflow_dispatch:  # also allows manual trigger from GitHub Actions UI
+
+jobs:
+  upload-and-restart:
+    name: Upload cookies to Blob + restart container
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Upload cookies.txt to Azure Blob
+        run: |
+          az storage blob upload \
+            --account-name quest1storage001 \
+            --container-name quest1-artifacts \
+            --name cookies.txt \
+            --file cookies.txt \
+            --account-key "${{ secrets.AZURE_STORAGE_KEY }}" \
+            --overwrite
+
+      - name: Verify upload
+        run: |
+          az storage blob show \
+            --account-name quest1storage001 \
+            --container-name quest1-artifacts \
+            --name cookies.txt \
+            --account-key "${{ secrets.AZURE_STORAGE_KEY }}" \
+            --query "{size:properties.contentLength, lastModified:properties.lastModified}" \
+            -o json
+
+      - name: Force container restart (new revision)
+        run: |
+          az containerapp update \
+            --name quest1-api \
+            --resource-group quest1-rg \
+            --set-env-vars COOKIES_REFRESH="$(date +%Y%m%d%H%M)" \
+            --output none
+
+      - name: Done
+        run: echo "✅ Cookies uploaded and container restarted."

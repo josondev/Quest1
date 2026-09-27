@@ -28,7 +28,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy source
 COPY . .
 
-# Pre-create storage directories
+# Pre-create storage directories with correct ownership
 RUN mkdir -p /app/artifacts /app/temp_data
 
 # Non-root user for security
