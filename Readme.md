@@ -674,7 +674,7 @@ The NiceGUI interface provides a user-friendly dashboard for submitting detectio
 
 My project produces the final visual evidence frame corresponding to the detected dialogue.
 
-![My project Detection Output](assets/output.jpg)
+![My project Detection Output](assets/output.jpeg)
 
 ---
 
