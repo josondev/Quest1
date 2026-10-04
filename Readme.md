@@ -658,7 +658,7 @@ The detected frame image if available.
 
 The FastAPI backend handles job creation, background execution, status tracking, and frame retrieval.
 
-![My project Backend](assets/backend.png)
+![My project Backend](assets/backend.jpeg)
 
 ---
 
@@ -666,7 +666,7 @@ The FastAPI backend handles job creation, background execution, status tracking,
 
 The NiceGUI interface provides a user-friendly dashboard for submitting detection tasks and monitoring results.
 
-![My project Frontend](assets/frontend.png)
+![My project Frontend](assets/frontend.jpeg)
 
 ---
 
@@ -674,7 +674,7 @@ The NiceGUI interface provides a user-friendly dashboard for submitting detectio
 
 My project produces the final visual evidence frame corresponding to the detected dialogue.
 
-![My project Detection Output](assets/the%20required%20output.jpg)
+![My project Detection Output](assets/output.jpg)
 
 ---
 
