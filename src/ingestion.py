@@ -12,11 +12,6 @@ from urllib.parse import urlparse
 
 import cv2
 import yt_dlp
-try:
-    from youtube_transcript_api import YouTubeTranscriptApi
-    _YT_TRANSCRIPT_API_AVAILABLE = True
-except ImportError:
-    _YT_TRANSCRIPT_API_AVAILABLE = False
 
 from src.config import settings
 from src.models.schemas import SubtitleMatchResult, VideoMetadata
@@ -65,78 +60,6 @@ def _get_cue_val(cue: Union[dict, SubtitleCue, Any], key: str) -> Any:
 
 
 class StreamIngestionService:
-    @staticmethod
-    def _extract_youtube_video_id(url: str) -> Optional[str]:
-        """Extract YouTube video ID from any YouTube URL format."""
-        import re
-        patterns = [
-            r"(?:v=|youtu\.be/|embed/|shorts/)([A-Za-z0-9_-]{11})",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, url)
-            if match:
-                return match.group(1)
-        return None
-
-    def _probe_youtube_no_cookies(self, url: str) -> Optional["VideoMetadata"]:
-        """
-        Fetch YouTube video metadata and subtitles WITHOUT cookies using
-        youtube-transcript-api + YouTube oEmbed API.
-        No yt-dlp, no cookies, no bot detection.
-        Returns VideoMetadata on success, None if unavailable.
-        """
-        if not _YT_TRANSCRIPT_API_AVAILABLE:
-            return None
-
-        video_id = self._extract_youtube_video_id(url)
-        if not video_id:
-            return None
-
-        duration = 0.0
-        has_subtitles = False
-        subtitle_cues: List[SubtitleCue] = []
-
-        # Fetch transcript — no auth, no cookies, works on any public video
-        try:
-            _api = YouTubeTranscriptApi()
-            fetched = _api.fetch(video_id)
-            for snippet in fetched:
-                start = float(snippet.start)
-                dur = float(snippet.duration)
-                text = str(snippet.text).strip()
-                if text:
-                    subtitle_cues.append(SubtitleCue(
-                        start_seconds=start,
-                        end_seconds=start + dur,
-                        text=text,
-                    ))
-            has_subtitles = len(subtitle_cues) > 0
-            if subtitle_cues:
-                duration = subtitle_cues[-1].end_seconds
-            logger.info(
-                "youtube-transcript-api: fetched %d cues for %s",
-                len(subtitle_cues), video_id,
-            )
-        except Exception as exc:
-            exc_name = type(exc).__name__
-            if exc_name in ("TranscriptsDisabled", "NoTranscriptFound", "VideoUnavailable", "NotTranslatable"):
-                logger.info("No transcript available for %s: %s", video_id, exc_name)
-            else:
-                logger.warning("Transcript fetch failed for %s: %s", video_id, exc)
-
-        # Store cues on instance so probe_embedded_subtitles_match can use them
-        self._yt_transcript_cache = {video_id: subtitle_cues}
-
-        return VideoMetadata(
-            url=url,
-            duration_seconds=duration,
-            fps=25.0,
-            total_frames=int(duration * 25.0),
-            has_subtitles=has_subtitles,
-            is_local=False,
-            stream_path=url,
-        )
-
     @staticmethod
     def _is_direct_stream(url: str) -> bool:
         """Check if URL points directly to a CDN stream, manifest, or segment."""
@@ -289,17 +212,10 @@ class StreamIngestionService:
         # ONLINE VIDEO
         # ==========================
 
+        cookies_path = self._get_cookies_path()
+        
         # Check if this is a YouTube URL to apply special handling
         is_youtube = "youtube.com" in url_or_path or "youtu.be" in url_or_path
-
-        # YouTube: try cookie-free path first via youtube-transcript-api + oEmbed
-        if is_youtube:
-            yt_meta = self._probe_youtube_no_cookies(url_or_path)
-            if yt_meta is not None:
-                logger.info("YouTube metadata fetched without cookies for %s", url_or_path)
-                return yt_meta
-
-        cookies_path = self._get_cookies_path()
         
         ydl_opts = {
             "quiet": True,
@@ -312,7 +228,7 @@ class StreamIngestionService:
         if is_youtube:
             ydl_opts["extractor_args"] = {
                 "youtube": {
-                    "player_client": ["tv_embedded", "web_creator"],
+                    "player_client": ["tv_embedded"],
                 }
             }
         
@@ -471,12 +387,7 @@ class StreamIngestionService:
 
 
                 if attempt == retries - 1:
-                    exc_str = str(exc)
-                    if "Sign in to confirm" in exc_str or "not a bot" in exc_str:
-                        raise IngestionError(
-                            "YouTube requires fresh authentication cookies. "
-                            "The operator is refreshing them — please retry in a few minutes."
-                        )
+
                     raise IngestionError(
                         f"Metadata probing failed: {exc}"
                     )
@@ -750,17 +661,6 @@ class StreamIngestionService:
         is_auto_generated: bool = False,
         **kwargs,
     ) -> Optional[SubtitleMatchResult]:
-        # Use cached transcript from youtube-transcript-api if available
-        video_id = self._extract_youtube_video_id(target_url)
-        if video_id and hasattr(self, "_yt_transcript_cache"):
-            cached_cues = self._yt_transcript_cache.get(video_id)
-            if cached_cues:
-                logger.info("Using cached transcript cues for subtitle match (%d cues)", len(cached_cues))
-                return self._match_phrase_in_cues(
-                    target_phrase=target_phrase,
-                    cues=cached_cues,
-                    similarity_threshold=similarity_threshold / 100.0,
-                )
         with tempfile.TemporaryDirectory(prefix="sub_probe_") as tmp_dir:
             res = self._download_subtitle_file(target_url, target_dir=Path(tmp_dir), **kwargs)
             vtt_path, detected_is_auto, detected_lang = res if isinstance(res, tuple) else (None, is_auto_generated, track_language)

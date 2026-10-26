@@ -1,4 +1,4 @@
-﻿# Core API & Async Web Framework
+# Core API & Async Web Framework
 fastapi>=0.110.0
 uvicorn[standard]>=0.28.0
 pydantic>=2.6.0
@@ -15,7 +15,6 @@ huggingface-hub>=0.22.0
 # Stream Ingestion & Metadata Probing
 # [default] includes yt-dlp-ejs (required for YouTube JS challenge solving)
 yt-dlp[default]>=2025.1.1
-youtube-transcript-api>=1.2.4
 
 # Image & Frame Processing
 opencv-python-headless>=4.9.0.80

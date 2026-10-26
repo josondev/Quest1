@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 import pytest
 
@@ -257,9 +257,8 @@ Hello world
         mock_cap.release.assert_called_once()
 
     # 16. Remote Video Probing via yt-dlp
-    @patch("src.ingestion.StreamIngestionService._probe_youtube_no_cookies", return_value=None)
     @patch("yt_dlp.YoutubeDL")
-    def test_probe_metadata_remote_success(self, mock_ydl_cls, mock_no_cookies):
+    def test_probe_metadata_remote_success(self, mock_ydl_cls):
         mock_ydl = MagicMock()
         mock_ydl_cls.return_value.__enter__.return_value = mock_ydl
         mock_ydl.extract_info.return_value = {
@@ -278,9 +277,8 @@ Hello world
         assert meta.stream_path == "https://googlevideo.com/stream"
 
     # 17. Remote Video Probing Failure
-    @patch("src.ingestion.StreamIngestionService._probe_youtube_no_cookies", return_value=None)
     @patch("yt_dlp.YoutubeDL")
-    def test_probe_metadata_failure_raises_ingestion_error(self, mock_ydl_cls, mock_no_cookies):
+    def test_probe_metadata_failure_raises_ingestion_error(self, mock_ydl_cls):
         mock_ydl = MagicMock()
         mock_ydl_cls.return_value.__enter__.return_value = mock_ydl
         mock_ydl.extract_info.side_effect = Exception("Network blocked")
