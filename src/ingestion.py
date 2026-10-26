@@ -228,7 +228,7 @@ class StreamIngestionService:
         if is_youtube:
             ydl_opts["extractor_args"] = {
                 "youtube": {
-                    "player_client": ["tv_embedded"],
+                    "player_client": ["tv_embedded", "web_creator"],
                 }
             }
         
@@ -387,7 +387,12 @@ class StreamIngestionService:
 
 
                 if attempt == retries - 1:
-
+                    exc_str = str(exc)
+                    if "Sign in to confirm" in exc_str or "not a bot" in exc_str:
+                        raise IngestionError(
+                            "YouTube requires fresh authentication cookies. "
+                            "The operator is refreshing them — please retry in a few minutes."
+                        )
                     raise IngestionError(
                         f"Metadata probing failed: {exc}"
                     )
