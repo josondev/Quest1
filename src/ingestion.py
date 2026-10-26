@@ -92,64 +92,50 @@ class StreamIngestionService:
         if not video_id:
             return None
 
+        duration = 0.0
+        has_subtitles = False
+        subtitle_cues: List[SubtitleCue] = []
+
+        # Fetch transcript — no auth, no cookies, works on any public video
         try:
-            # Get duration via oEmbed (free, no auth, no quota)
-            import json
-            import urllib.request as _req
-            oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
-            with _req.urlopen(oembed_url, timeout=10) as resp:
-                oembed = json.loads(resp.read().decode())
-            # oEmbed doesn't give duration — use a default, pipeline will handle it
-            duration = 0.0
-            has_subtitles = False
-            subtitle_cues: List[SubtitleCue] = []
-
-            # Try fetching transcript (works for auto-generated too)
-            # youtube-transcript-api v1.2.4+ uses instance-based API
-            try:
-                from youtube_transcript_api._errors import VideoUnavailable
-                _api = YouTubeTranscriptApi()
-                fetched = _api.fetch(video_id)
-                for snippet in fetched:
-                    start = float(snippet.start)
-                    dur = float(snippet.duration)
-                    text = str(snippet.text).strip()
-                    if text:
-                        subtitle_cues.append(SubtitleCue(
-                            start_seconds=start,
-                            end_seconds=start + dur,
-                            text=text,
-                        ))
-                has_subtitles = len(subtitle_cues) > 0
-                if subtitle_cues:
-                    duration = subtitle_cues[-1].end_seconds
-                logger.info(
-                    "youtube-transcript-api: fetched %d cues for %s",
-                    len(subtitle_cues), video_id,
-                )
-            except Exception as exc:
-                exc_name = type(exc).__name__
-                if exc_name in ("TranscriptsDisabled", "NoTranscriptFound", "VideoUnavailable", "NotTranslatable"):
-                    logger.info("No transcript available for %s: %s", video_id, exc_name)
-                else:
-                    logger.warning("Transcript fetch failed for %s: %s", video_id, exc)
-
-            # Store cues on instance so probe_embedded_subtitles_match can use them
-            self._yt_transcript_cache = {video_id: subtitle_cues}
-
-            return VideoMetadata(
-                url=url,
-                duration_seconds=duration,
-                fps=25.0,  # default — yt-dlp will refine this for stream
-                total_frames=int(duration * 25.0),
-                has_subtitles=has_subtitles,
-                is_local=False,
-                stream_path=url,  # stream URL resolved later by yt-dlp
+            _api = YouTubeTranscriptApi()
+            fetched = _api.fetch(video_id)
+            for snippet in fetched:
+                start = float(snippet.start)
+                dur = float(snippet.duration)
+                text = str(snippet.text).strip()
+                if text:
+                    subtitle_cues.append(SubtitleCue(
+                        start_seconds=start,
+                        end_seconds=start + dur,
+                        text=text,
+                    ))
+            has_subtitles = len(subtitle_cues) > 0
+            if subtitle_cues:
+                duration = subtitle_cues[-1].end_seconds
+            logger.info(
+                "youtube-transcript-api: fetched %d cues for %s",
+                len(subtitle_cues), video_id,
             )
-
         except Exception as exc:
-            logger.warning("_probe_youtube_no_cookies failed: %s", exc)
-            return None
+            exc_name = type(exc).__name__
+            if exc_name in ("TranscriptsDisabled", "NoTranscriptFound", "VideoUnavailable", "NotTranslatable"):
+                logger.info("No transcript available for %s: %s", video_id, exc_name)
+            else:
+                logger.warning("Transcript fetch failed for %s: %s", video_id, exc)
+
+        # Store cues on instance so probe_embedded_subtitles_match can use them
+        self._yt_transcript_cache = {video_id: subtitle_cues}
+
+        return VideoMetadata(
+            url=url,
+            duration_seconds=duration,
+            fps=25.0,
+            total_frames=int(duration * 25.0),
+            has_subtitles=has_subtitles,
+            is_local=False,
+            stream_path=url,
+        )
 
     @staticmethod
     def _is_direct_stream(url: str) -> bool:
