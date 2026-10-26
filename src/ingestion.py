@@ -14,7 +14,6 @@ import cv2
 import yt_dlp
 try:
     from youtube_transcript_api import YouTubeTranscriptApi
-    from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound
     _YT_TRANSCRIPT_API_AVAILABLE = True
 except ImportError:
     _YT_TRANSCRIPT_API_AVAILABLE = False
@@ -106,19 +105,15 @@ class StreamIngestionService:
             subtitle_cues: List[SubtitleCue] = []
 
             # Try fetching transcript (works for auto-generated too)
+            # youtube-transcript-api v1.2.4+ uses instance-based API
             try:
-                transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-                # prefer manual English, fall back to auto-generated
-                try:
-                    transcript = transcript_list.find_manually_created_transcript(["en", "en-US", "en-GB"])
-                except Exception:
-                    transcript = transcript_list.find_generated_transcript(["en", "en-US", "en-GB"])
-
-                raw = transcript.fetch()
-                for entry in raw:
-                    start = float(entry.get("start", 0))
-                    dur = float(entry.get("duration", 2))
-                    text = str(entry.get("text", "")).strip()
+                from youtube_transcript_api._errors import VideoUnavailable
+                _api = YouTubeTranscriptApi()
+                fetched = _api.fetch(video_id)
+                for snippet in fetched:
+                    start = float(snippet.start)
+                    dur = float(snippet.duration)
+                    text = str(snippet.text).strip()
                     if text:
                         subtitle_cues.append(SubtitleCue(
                             start_seconds=start,
@@ -132,10 +127,12 @@ class StreamIngestionService:
                     "youtube-transcript-api: fetched %d cues for %s",
                     len(subtitle_cues), video_id,
                 )
-            except (TranscriptsDisabled, NoTranscriptFound):
-                logger.info("No transcript available for %s â€” subtitles disabled", video_id)
             except Exception as exc:
-                logger.warning("Transcript fetch failed for %s: %s", video_id, exc)
+                exc_name = type(exc).__name__
+                if exc_name in ("TranscriptsDisabled", "NoTranscriptFound", "VideoUnavailable", "NotTranslatable"):
+                    logger.info("No transcript available for %s: %s", video_id, exc_name)
+                else:
+                    logger.warning("Transcript fetch failed for %s: %s", video_id, exc)
 
             # Store cues on instance so probe_embedded_subtitles_match can use them
             self._yt_transcript_cache = {video_id: subtitle_cues}
