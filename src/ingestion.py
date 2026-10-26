@@ -1,4 +1,4 @@
-﻿import difflib
+import difflib
 import logging
 import re
 import shutil
@@ -99,7 +99,7 @@ class StreamIngestionService:
             oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
             with _req.urlopen(oembed_url, timeout=10) as resp:
                 oembed = json.loads(resp.read().decode())
-            # oEmbed doesn't give duration â€” use a default, pipeline will handle it
+            # oEmbed doesn't give duration — use a default, pipeline will handle it
             duration = 0.0
             has_subtitles = False
             subtitle_cues: List[SubtitleCue] = []
@@ -140,7 +140,7 @@ class StreamIngestionService:
             return VideoMetadata(
                 url=url,
                 duration_seconds=duration,
-                fps=25.0,  # default â€” yt-dlp will refine this for stream
+                fps=25.0,  # default — yt-dlp will refine this for stream
                 total_frames=int(duration * 25.0),
                 has_subtitles=has_subtitles,
                 is_local=False,
@@ -196,7 +196,7 @@ class StreamIngestionService:
         container = settings.azure_blob_container
 
         if not conn_str or not blob_name:
-            # No Azure storage configured â€” check if cookies.txt exists locally
+            # No Azure storage configured — check if cookies.txt exists locally
             local_cookies = Path("cookies.txt")
             if local_cookies.exists():
                 logger.info("Using local cookies.txt")
@@ -228,7 +228,7 @@ class StreamIngestionService:
                 f.write(blob.download_blob().readall())
 
             logger.info(
-                "Downloaded cookies.txt from Blob â†’ %s (%d bytes)",
+                "Downloaded cookies.txt from Blob → %s (%d bytes)",
                 cache_path,
                 cache_path.stat().st_size,
             )
@@ -489,7 +489,7 @@ class StreamIngestionService:
                     if "Sign in to confirm" in exc_str or "not a bot" in exc_str:
                         raise IngestionError(
                             "YouTube requires fresh authentication cookies. "
-                            "The operator is refreshing them â€” please retry in a few minutes."
+                            "The operator is refreshing them — please retry in a few minutes."
                         )
                     raise IngestionError(
                         f"Metadata probing failed: {exc}"
@@ -771,7 +771,7 @@ class StreamIngestionService:
             if cached_cues:
                 logger.info("Using cached transcript cues for subtitle match (%d cues)", len(cached_cues))
                 return self._match_phrase_in_cues(
-                    target_phrase=target_dialogue,
+                    target_phrase=target_phrase,
                     cues=cached_cues,
                     similarity_threshold=similarity_threshold / 100.0,
                 )
