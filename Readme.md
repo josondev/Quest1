@@ -585,8 +585,21 @@ python tools\submit_youtube_url.py `
   --confirm-authorized
 ```
 
-The relay requires FFmpeg and deletes its temporary download after submission.
-It prints a job ID that can be checked in the Quest1 dashboard.
+The relay requires FFmpeg, waits for the detection job, prints the result, and
+deletes its temporary download after submission. If anonymous local fetching is
+also rejected, pass a fresh local cookie file as a fallback:
+
+```powershell
+python tools\submit_youtube_url.py `
+  --url "https://www.youtube.com/watch?v=VIDEO_ID" `
+  --target-text "dialogue to find" `
+  --cookies-file "C:\path\to\youtube-cookies.txt" `
+  --confirm-authorized
+```
+
+The script first tries without cookies; only on a YouTube authentication/bot
+challenge will it use the explicitly supplied cookie file. Cookies are never
+sent to Quest1.
 
 ---
 

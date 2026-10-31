@@ -1021,6 +1021,46 @@ class StreamIngestionService:
             timestamp_seconds
         )
 
+        local_video = Path(stream_url)
+        if local_video.is_file():
+            cap = cv2.VideoCapture(str(local_video))
+            try:
+                if not cap.isOpened():
+                    logger.warning(
+                        "Unable to open local video for frame extraction: %s",
+                        local_video,
+                    )
+                    return False
+
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                frame_number = (
+                    int(max(0.0, timestamp_seconds) * fps)
+                    if fps > 0
+                    else 0
+                )
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+                success, frame = cap.read()
+                if (
+                    success
+                    and frame is not None
+                    and cv2.imwrite(str(output_jpg), frame)
+                    and output_jpg.is_file()
+                    and output_jpg.stat().st_size > 0
+                ):
+                    logger.info(
+                        "Frame extracted from local video at %.3fs",
+                        timestamp_seconds,
+                    )
+                    return True
+            finally:
+                cap.release()
+
+            logger.warning(
+                "Unable to extract frame from local video at %.3fs: %s",
+                timestamp_seconds,
+                local_video,
+            )
+            return False
 
         # =====================================================
         # STEP 1: Resolve proper stream using yt-dlp

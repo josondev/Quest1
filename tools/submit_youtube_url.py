@@ -2,6 +2,7 @@ import argparse
 import os
 import shutil
 import tempfile
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -15,6 +16,10 @@ DEFAULT_API_URL = (
 )
 MAX_UPLOAD_BYTES = 250 * 1024 * 1024
 YOUTUBE_DOMAINS = {"youtube.com", "youtu.be"}
+VIDEO_EXTENSIONS = {
+    ".3gp", ".avi", ".flv", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg",
+    ".mpg", ".ts", ".webm",
+}
 
 
 def is_youtube_url(url: str) -> bool:
@@ -29,11 +34,27 @@ def is_youtube_url(url: str) -> bool:
     )
 
 
-def download_authorized_video(url: str, destination: Path) -> Path:
+def _is_cookie_auth_error(error: yt_dlp.utils.DownloadError) -> bool:
+    message = str(error).casefold()
+    return any(
+        phrase in message
+        for phrase in ("sign in to confirm", "not a bot", "cookies are no longer valid")
+    )
+
+
+def download_authorized_video(
+    url: str,
+    destination: Path,
+    cookies_file: Path | None = None,
+) -> Path:
     if not is_youtube_url(url):
         raise ValueError("This local relay currently accepts HTTPS YouTube URLs only.")
     if not shutil.which("ffmpeg"):
         raise RuntimeError("FFmpeg is required locally to combine video and audio streams.")
+    if cookies_file is not None:
+        cookies_file = cookies_file.expanduser().resolve()
+        if not cookies_file.is_file():
+            raise FileNotFoundError(f"Cookie file not found: {cookies_file}")
 
     options = {
         "format": "bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/"
@@ -48,15 +69,26 @@ def download_authorized_video(url: str, destination: Path) -> Path:
         "noprogress": True,
     }
 
-    with yt_dlp.YoutubeDL(options) as downloader:
-        info = downloader.extract_info(url, download=True)
-        if not info:
-            raise RuntimeError("yt-dlp did not return video information.")
+    try:
+        with yt_dlp.YoutubeDL(options) as downloader:
+            info = downloader.extract_info(url, download=True)
+            if not info:
+                raise RuntimeError("yt-dlp did not return video information.")
+    except yt_dlp.utils.DownloadError as exc:
+        if cookies_file is None or not _is_cookie_auth_error(exc):
+            raise
+
+        print("Anonymous YouTube access was rejected; retrying with the specified local cookie file.")
+        options["cookiefile"] = str(cookies_file)
+        with yt_dlp.YoutubeDL(options) as downloader:
+            info = downloader.extract_info(url, download=True)
+            if not info:
+                raise RuntimeError("yt-dlp did not return video information.")
 
     candidates = [
         path
         for path in destination.iterdir()
-        if path.is_file() and path.suffix not in {".part", ".ytdl"}
+        if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS
     ]
     if not candidates:
         raise RuntimeError("yt-dlp completed without producing a video file.")
@@ -81,11 +113,28 @@ def submit_video(api_url: str, video_path: Path, target_text: str) -> str:
     return response.json()["job_id"]
 
 
+def wait_for_job(api_url: str, job_id: str, timeout_seconds: int = 1800) -> dict:
+    deadline = time.monotonic() + timeout_seconds
+    with httpx.Client(timeout=30.0) as client:
+        while time.monotonic() < deadline:
+            response = client.get(
+                f"{api_url.rstrip('/')}/api/v1/jobs/{job_id}"
+            )
+            response.raise_for_status()
+            result = response.json()
+            if result["status"] in {
+                "completed", "failed", "uncertain", "ambiguous"
+            }:
+                return result
+            time.sleep(5)
+    raise TimeoutError(f"Quest1 job {job_id} did not finish in time.")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Fetch an authorized public YouTube video locally without cookies, "
-            "then submit it to Quest1 for dialogue detection."
+            "Fetch an authorized YouTube video locally, optionally using a "
+            "local cookie file as a fallback, then submit it to Quest1."
         )
     )
     parser.add_argument("--url", required=True, help="HTTPS YouTube video URL")
@@ -100,6 +149,14 @@ def main() -> int:
         action="store_true",
         help="Confirm that you are authorized to download and process this video",
     )
+    parser.add_argument(
+        "--cookies-file",
+        type=Path,
+        help=(
+            "Optional local YouTube cookies file. Used only as a fallback if "
+            "anonymous download is rejected; it is never uploaded to Quest1."
+        ),
+    )
     args = parser.parse_args()
 
     if not args.confirm_authorized:
@@ -111,13 +168,32 @@ def main() -> int:
 
     try:
         with tempfile.TemporaryDirectory(prefix="quest1-youtube-") as temp_dir:
-            print("Downloading the authorized video locally (no cookies are read or sent).")
-            video_path = download_authorized_video(args.url, Path(temp_dir))
+            print("Downloading the authorized video locally; any cookies stay on this machine.")
+            video_path = download_authorized_video(
+                args.url,
+                Path(temp_dir),
+                args.cookies_file,
+            )
             print(f"Downloaded video: {video_path.stat().st_size / (1024 * 1024):.1f} MiB")
             job_id = submit_video(args.api_url, video_path, args.target_text.strip())
         print(f"Quest1 job submitted: {job_id}")
-        return 0
-    except (httpx.HTTPError, OSError, RuntimeError, ValueError, yt_dlp.utils.DownloadError) as exc:
+        result = wait_for_job(args.api_url, job_id)
+        print(f"Status: {result['status']}")
+        if result.get("formatted_timestamp"):
+            print(f"Timestamp: {result['formatted_timestamp']}")
+        if result.get("extracted_text"):
+            print(f"Matched dialogue: {result['extracted_text']}")
+        if result.get("error_message"):
+            print(f"Quest1 error: {result['error_message']}")
+        return 1 if result["status"] == "failed" else 0
+    except (
+        httpx.HTTPError,
+        OSError,
+        RuntimeError,
+        TimeoutError,
+        ValueError,
+        yt_dlp.utils.DownloadError,
+    ) as exc:
         print(f"Could not submit video: {exc}")
         return 1
 
