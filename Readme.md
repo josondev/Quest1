@@ -506,17 +506,14 @@ Example:
 MODEL_PROVIDER_API_KEY=<your_key>
 ```
 
-### Legacy proxy configuration
+### When cloud URL ingestion is blocked
 
-The proxy notes below are retained for existing deployments; public/free proxies are unreliable and are not a workaround for platform authentication or bot checks. If URL-based processing is blocked, use the dashboard upload option with a video file you are authorized to use.
+Cloud-hosted requests can be rejected based on their network origin. Do not rely on public proxies or upload account cookies to work around platform checks. For an authorized YouTube video, use the local relay below to fetch it from your own network without cookies, then submit it to Quest1.
 
-- 15 datacenter IPs
-- 2 GB monthly traffic
-- Better IP reputation than other free providers
 
-**See detailed setup guide:** [docs/brightdata-setup.md](docs/brightdata-setup.md)
+Proxy setup is intentionally omitted: public proxies are not a reliable fix for platform bot checks.
 
-Quick setup:
+Deprecated legacy example (not recommended for production):
 1. Sign up at [Bright Data](https://brightdata.com/)
 2. Create a Datacenter proxy zone
 3. Add credentials to `.env`:
@@ -575,6 +572,21 @@ curl -X POST http://127.0.0.1:8000/api/v1/jobs/upload \
   -F "target_text=hello there" \
   -F "file=@clip.mp4"
 ```
+
+For authorized YouTube videos that Azure cannot fetch directly, you can run the
+local relay from a machine that can access the video. It downloads at up to
+360p without reading or sending browser cookies, then uploads the video to the
+Quest1 API:
+
+```powershell
+python tools\submit_youtube_url.py `
+  --url "https://www.youtube.com/watch?v=VIDEO_ID" `
+  --target-text "dialogue to find" `
+  --confirm-authorized
+```
+
+The relay requires FFmpeg and deletes its temporary download after submission.
+It prints a job ID that can be checked in the Quest1 dashboard.
 
 ---
 
