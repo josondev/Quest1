@@ -506,9 +506,9 @@ Example:
 MODEL_PROVIDER_API_KEY=<your_key>
 ```
 
-### Proxy Configuration (Recommended for YouTube)
+### Legacy proxy configuration
 
-To avoid bot detection when scraping YouTube playlists, configure a proxy service. We recommend **Bright Data** for the best free tier:
+The proxy notes below are retained for existing deployments; public/free proxies are unreliable and are not a workaround for platform authentication or bot checks. If URL-based processing is blocked, use the dashboard upload option with a video file you are authorized to use.
 
 - 15 datacenter IPs
 - 2 GB monthly traffic
@@ -561,9 +561,20 @@ http://127.0.0.1:8080
 The dashboard allows:
 
 - Submitting dialogue detection jobs
+- Uploading authorized MP4/MOV/MKV/WebM and other supported video files (up to 250 MB by default)
 - Monitoring job status
 - Tracking pipeline progress
 - Viewing extracted frames
+
+For YouTube videos or Instagram Reels that cannot be processed from their URL, use the upload option with a video file you are authorized to use. Quest1 does not use public proxies to bypass platform bot checks. Upload limits can be changed with `MAX_VIDEO_UPLOAD_BYTES`.
+
+The upload API accepts multipart form data:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/jobs/upload \
+  -F "target_text=hello there" \
+  -F "file=@clip.mp4"
+```
 
 ---
 

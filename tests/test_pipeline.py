@@ -156,6 +156,49 @@ class TestPipelineOrchestrator:
 
         ingestion_service.extract_audio_stream.assert_not_called()
 
+    def test_run_uses_uploaded_video_as_pipeline_source(self, tmp_path):
+        uploaded_video = tmp_path / "authorized_clip.mp4"
+        uploaded_video.touch()
+        ingestion_service = MagicMock()
+        ingestion_service.probe_metadata.return_value = VideoMetadata(
+            url=str(uploaded_video),
+            duration_seconds=100.0,
+            fps=25.0,
+            has_subtitles=True,
+            is_local=True,
+            stream_path=str(uploaded_video),
+        )
+        ingestion_service.probe_embedded_subtitles_match.return_value = (
+            SubtitleMatchResult(
+                start_time=12.5,
+                end_time=15.0,
+                matched_text="hello there",
+                similarity_score=0.95,
+                track_language="en",
+                is_auto_generated=False,
+            )
+        )
+        orchestrator = PipelineOrchestrator(
+            ingestion_service=ingestion_service
+        )
+        orchestrator._persist_frame = MagicMock(return_value=None)
+        request = JobRequest(
+            local_file_path=str(uploaded_video),
+            target_text="hello there",
+        )
+
+        result = orchestrator.run("uploaded_video_job", request)
+
+        assert result.status == JobStatus.COMPLETED
+        ingestion_service.probe_metadata.assert_called_once_with(
+            str(uploaded_video)
+        )
+        ingestion_service.probe_embedded_subtitles_match.assert_called_once_with(
+            str(uploaded_video),
+            "hello there",
+            similarity_threshold=85.0,
+        )
+
     # ============================================================
     # TIER 1 -> TIER 3 -> FALLBACK
     # ============================================================

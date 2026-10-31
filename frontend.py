@@ -1,6 +1,12 @@
 import os
+import tempfile
+from pathlib import Path
+
 import httpx
 from nicegui import ui
+from nicegui.events import UploadEventArguments
+
+from src.config import settings
 
 # ──────────────────────────────────────────────
 # CONFIG
@@ -63,6 +69,35 @@ async def submit_job(url: str, target_text: str) -> None:
     except Exception as exc:
         state["status"] = "failed"
         state["error"]  = str(exc)
+
+async def submit_uploaded_job(event: UploadEventArguments, target_text: str) -> None:
+    filename = Path(event.file.name).name
+    _reset_state(filename, target_text)
+    try:
+        with tempfile.TemporaryDirectory(prefix="quest1_upload_") as upload_dir:
+            video_path = Path(upload_dir) / filename
+            await event.file.save(video_path)
+            timeout = httpx.Timeout(300.0)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                with video_path.open("rb") as video_file:
+                    response = await client.post(
+                        f"{BACKEND_URL}/api/v1/jobs/upload",
+                        data={"target_text": target_text},
+                        files={
+                            "file": (
+                                filename,
+                                video_file,
+                                event.file.content_type,
+                            )
+                        },
+                    )
+                response.raise_for_status()
+            data = response.json()
+            state["job_id"] = data.get("job_id")
+            state["status"] = data.get("status")
+    except Exception as exc:
+        state["status"] = "failed"
+        state["error"] = str(exc)
 
 async def poll_job_status() -> None:
     if not state["job_id"] or state["status"] in TERMINAL_STATUSES:
@@ -165,6 +200,20 @@ def dashboard() -> None:
                 .props('outlined dense label="Target Dialogue" color="indigo"')
                 .classes("w-full mt-3")
             )
+
+            ui.label(
+                "Or upload an authorized video (submits when selected)"
+            ).classes("text-xs text-gray-500 mt-4")
+            video_upload = ui.upload(
+                on_upload=lambda event: submit_uploaded_job(
+                    event,
+                    dialogue_text.value.strip(),
+                ),
+                auto_upload=True,
+                max_file_size=settings.max_video_upload_bytes,
+            ).props(
+                'accept=".3gp,.avi,.flv,.m4v,.mkv,.mov,.mp4,.mpeg,.mpg,.ts,.webm"'
+            ).classes("w-full mt-2")
 
             run_btn = (
                 ui.button("🔍  Run Detection")

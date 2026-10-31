@@ -2,7 +2,7 @@ import uuid
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi import FastAPI, BackgroundTasks, File, Form, HTTPException, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -18,6 +18,11 @@ from src.storage import JobStore, ArtifactStore
 
 
 logger = logging.getLogger(__name__)
+
+VIDEO_UPLOAD_EXTENSIONS = {
+    ".3gp", ".avi", ".flv", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg",
+    ".mpg", ".ts", ".webm",
+}
 
 
 app = FastAPI(
@@ -170,6 +175,15 @@ def _execute_pipeline_background(
             target_dialogue=request.target_text,
             error_message=str(exc),
         ))
+    finally:
+        if request.local_file_path:
+            upload_root = (Path(settings.temp_storage_dir) / "uploads").resolve()
+            uploaded_path = Path(request.local_file_path).resolve()
+            if uploaded_path.is_relative_to(upload_root):
+                try:
+                    uploaded_path.unlink(missing_ok=True)
+                except OSError:
+                    logger.exception("Could not remove uploaded video for job %s", job_id)
 
 
 
@@ -204,6 +218,81 @@ async def create_detection_job(
         request,
     )
 
+
+    return {
+        "job_id": job_id,
+        "status": "processing",
+        "target_dialogue": request.target_text,
+    }
+
+
+@app.post(
+    "/api/v1/jobs/upload",
+    status_code=202,
+)
+async def create_uploaded_detection_job(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    target_text: str = Form(...),
+):
+    target_text = target_text.strip()
+    if not target_text:
+        raise HTTPException(
+            status_code=422,
+            detail="Target dialogue cannot be empty.",
+        )
+
+    extension = Path(file.filename or "").suffix.lower()
+    if extension not in VIDEO_UPLOAD_EXTENSIONS:
+        raise HTTPException(
+            status_code=415,
+            detail="Unsupported video type. Upload an MP4, MOV, MKV, WebM, AVI, or supported video file.",
+        )
+
+    job_id = f"job_{uuid.uuid4().hex[:10]}"
+    upload_root = Path(settings.temp_storage_dir) / "uploads"
+    upload_root.mkdir(parents=True, exist_ok=True)
+    upload_path = upload_root / f"{job_id}{extension}"
+    total_bytes = 0
+
+    try:
+        with upload_path.open("wb") as destination:
+            while chunk := await file.read(1024 * 1024):
+                total_bytes += len(chunk)
+                if total_bytes > settings.max_video_upload_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=(
+                            "Video exceeds the upload limit of "
+                            f"{settings.max_video_upload_bytes // (1024 * 1024)} MB."
+                        ),
+                    )
+                destination.write(chunk)
+        if total_bytes == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Uploaded video file is empty.",
+            )
+    except Exception:
+        upload_path.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
+
+    request = JobRequest(
+        local_file_path=str(upload_path),
+        target_text=target_text,
+    )
+    job_store.put(job_id, DetectionResult(
+        job_id=job_id,
+        status=JobStatus.PROCESSING,
+        target_dialogue=request.target_text,
+    ))
+    background_tasks.add_task(
+        _execute_pipeline_background,
+        job_id,
+        request,
+    )
 
     return {
         "job_id": job_id,

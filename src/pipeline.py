@@ -358,6 +358,9 @@ class PipelineOrchestrator:
         )
 
         try:
+            video_input = request.local_file_path or request.url
+            if not video_input:
+                raise ValueError("A video URL or uploaded file is required.")
 
             # ==================================================
             # METADATA / STREAM RESOLUTION
@@ -365,7 +368,7 @@ class PipelineOrchestrator:
 
             metadata = (
                 self.ingestion_service
-                .probe_metadata(request.url)
+                .probe_metadata(video_input)
             )
 
             fps = (
@@ -376,7 +379,7 @@ class PipelineOrchestrator:
 
             video_source = (
                 metadata.stream_path
-                or request.url
+                or video_input
             )
 
             if metadata.is_local:
@@ -399,7 +402,7 @@ class PipelineOrchestrator:
                 tier0_result = (
                     self.ingestion_service
                     .probe_embedded_subtitles_match(
-                        request.url,
+                        video_input,
                         request.target_text,
                         similarity_threshold=85.0,
                     )

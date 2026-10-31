@@ -118,6 +118,11 @@ class Settings(BaseSettings):
         default=Path("./temp_data"),
         description="Directory for temporary audio slices and frame buffers"
     )
+    max_video_upload_bytes: int = Field(
+        default=250 * 1024 * 1024,
+        gt=0,
+        description="Maximum size of a user-uploaded video in bytes"
+    )
     api_host: str = Field(default="0.0.0.0", description="FastAPI host")
     api_port: int = Field(default=8000, description="FastAPI port")
 

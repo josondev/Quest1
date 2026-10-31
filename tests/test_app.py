@@ -28,6 +28,50 @@ class TestFastAPIEndpoints:
         assert data["status"] == "processing"
         assert data["target_dialogue"] == "Never gonna give you up"
 
+    @patch("src.app._execute_pipeline_background")
+    def test_create_uploaded_job_stores_video_for_pipeline(
+        self, mock_execute, client, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr("src.app.settings.temp_storage_dir", tmp_path)
+
+        response = client.post(
+            "/api/v1/jobs/upload",
+            data={"target_text": "hello there"},
+            files={"file": ("clip.mp4", b"video-data", "video/mp4")},
+        )
+
+        assert response.status_code == 202
+        job = response.json()
+        assert job["status"] == "processing"
+        mock_execute.assert_called_once()
+        request = mock_execute.call_args.args[1]
+        assert request.local_file_path.endswith(".mp4")
+        assert Path(request.local_file_path).read_bytes() == b"video-data"
+
+    def test_uploaded_job_rejects_unsupported_file_type(self, client, tmp_path, monkeypatch):
+        monkeypatch.setattr("src.app.settings.temp_storage_dir", tmp_path)
+
+        response = client.post(
+            "/api/v1/jobs/upload",
+            data={"target_text": "hello there"},
+            files={"file": ("notes.txt", b"not a video", "text/plain")},
+        )
+
+        assert response.status_code == 415
+
+    def test_uploaded_job_rejects_files_over_size_limit(self, client, tmp_path, monkeypatch):
+        monkeypatch.setattr("src.app.settings.temp_storage_dir", tmp_path)
+        monkeypatch.setattr("src.app.settings.max_video_upload_bytes", 4)
+
+        response = client.post(
+            "/api/v1/jobs/upload",
+            data={"target_text": "hello there"},
+            files={"file": ("clip.mp4", b"12345", "video/mp4")},
+        )
+
+        assert response.status_code == 413
+        assert list((tmp_path / "uploads").iterdir()) == []
+
     def test_create_job_invalid_url_rejected(self, client):
         payload = {
             "url": "ftp://invalid-scheme.com/video.mp4",
