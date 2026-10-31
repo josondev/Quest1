@@ -506,14 +506,17 @@ Example:
 MODEL_PROVIDER_API_KEY=<your_key>
 ```
 
-### When cloud URL ingestion is blocked
+### Legacy proxy configuration
 
-Cloud-hosted requests can be rejected based on their network origin. Do not rely on public proxies or upload account cookies to work around platform checks. For an authorized YouTube video, use the local relay below to fetch it from your own network without cookies, then submit it to Quest1.
+The proxy notes below are retained for existing deployments; public/free proxies are unreliable and are not a workaround for platform authentication or bot checks. If URL-based processing is blocked, use the dashboard upload option with a video file you are authorized to use.
 
+- 15 datacenter IPs
+- 2 GB monthly traffic
+- Better IP reputation than other free providers
 
-Proxy setup is intentionally omitted: public proxies are not a reliable fix for platform bot checks.
+**See detailed setup guide:** [docs/brightdata-setup.md](docs/brightdata-setup.md)
 
-Deprecated legacy example (not recommended for production):
+Quick setup:
 1. Sign up at [Bright Data](https://brightdata.com/)
 2. Create a Datacenter proxy zone
 3. Add credentials to `.env`:
@@ -572,34 +575,6 @@ curl -X POST http://127.0.0.1:8000/api/v1/jobs/upload \
   -F "target_text=hello there" \
   -F "file=@clip.mp4"
 ```
-
-For authorized YouTube videos that Azure cannot fetch directly, you can run the
-local relay from a machine that can access the video. It downloads at up to
-360p without reading or sending browser cookies, then uploads the video to the
-Quest1 API:
-
-```powershell
-python tools\submit_youtube_url.py `
-  --url "https://www.youtube.com/watch?v=VIDEO_ID" `
-  --target-text "dialogue to find" `
-  --confirm-authorized
-```
-
-The relay requires FFmpeg, waits for the detection job, prints the result, and
-deletes its temporary download after submission. If anonymous local fetching is
-also rejected, pass a fresh local cookie file as a fallback:
-
-```powershell
-python tools\submit_youtube_url.py `
-  --url "https://www.youtube.com/watch?v=VIDEO_ID" `
-  --target-text "dialogue to find" `
-  --cookies-file "C:\path\to\youtube-cookies.txt" `
-  --confirm-authorized
-```
-
-The script first tries without cookies; only on a YouTube authentication/bot
-challenge will it use the explicitly supplied cookie file. Cookies are never
-sent to Quest1.
 
 ---
 

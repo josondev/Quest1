@@ -43,44 +43,6 @@ rebels at <i>stagnation</i>.
         assert cues[0]["text"] == "My mind"
         assert cues[1]["text"] == "rebels at stagnation."
 
-    def test_extract_frame_from_local_video_without_url_resolution(
-        self, tmp_path, monkeypatch
-    ):
-        import src.ingestion as ingestion
-
-        video_file = tmp_path / "uploaded.mp4"
-        video_file.write_bytes(b"video")
-        output_file = tmp_path / "frame.jpg"
-        capture = MagicMock()
-        capture.isOpened.return_value = True
-        capture.get.return_value = 30.0
-        capture.read.return_value = (True, object())
-        monkeypatch.setattr(ingestion.cv2, "VideoCapture", lambda _path: capture)
-
-        def write_frame(path, _frame):
-            Path(path).write_bytes(b"jpeg")
-            return True
-
-        monkeypatch.setattr(ingestion.cv2, "imwrite", write_frame)
-        monkeypatch.setattr(
-            ingestion.yt_dlp,
-            "YoutubeDL",
-            lambda *_args, **_kwargs: pytest.fail(
-                "Local video frame extraction must not resolve a URL."
-            ),
-        )
-
-        extracted = StreamIngestionService().extract_frame_on_demand(
-            str(video_file),
-            2.0,
-            output_file,
-        )
-
-        assert extracted
-        assert output_file.read_bytes() == b"jpeg"
-        capture.set.assert_called_once_with(ingestion.cv2.CAP_PROP_POS_FRAMES, 60)
-        capture.release.assert_called_once()
-
     # 4. Multi-Cue Match Across 3 Cues
     def test_match_phrase_across_3_cues(self):
         service = StreamIngestionService()
@@ -324,52 +286,6 @@ Hello world
         service = StreamIngestionService()
         with pytest.raises(IngestionError, match="Metadata probing failed: Network blocked"):
             service.probe_metadata("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
-
-    @patch.object(
-        StreamIngestionService,
-        "_get_cookies_path",
-        side_effect=["stale-cookies.txt", "refreshed-cookies.txt"],
-    )
-    @patch("yt_dlp.YoutubeDL")
-    def test_probe_metadata_refreshes_cookies_after_youtube_bot_challenge(
-        self, mock_ydl_cls, mock_get_cookies
-    ):
-        first_ydl = MagicMock()
-        first_ydl.extract_info.side_effect = Exception(
-            "Sign in to confirm you’re not a bot"
-        )
-        refreshed_ydl = MagicMock()
-        refreshed_ydl.extract_info.return_value = {
-            "duration": 120.0,
-            "fps": 30.0,
-            "subtitles": {},
-            "formats": [
-                {
-                    "vcodec": "h264",
-                    "acodec": "aac",
-                    "url": "https://googlevideo.com/stream",
-                }
-            ],
-        }
-        mock_ydl_cls.return_value.__enter__.side_effect = [first_ydl, refreshed_ydl]
-        ydl_options = []
-
-        def capture_ydl_options(options):
-            ydl_options.append(dict(options))
-            return mock_ydl_cls.return_value
-
-        mock_ydl_cls.side_effect = capture_ydl_options
-
-        service = StreamIngestionService()
-        metadata = service.probe_metadata(
-            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-            retries=1,
-        )
-
-        assert metadata.stream_path == "https://googlevideo.com/stream"
-        assert ydl_options[0]["cookiefile"] == "stale-cookies.txt"
-        assert ydl_options[1]["cookiefile"] == "refreshed-cookies.txt"
-        mock_get_cookies.assert_any_call(force_refresh=True)
 
     # 18. Local Audio Extraction Shortcut
     @patch("subprocess.run")

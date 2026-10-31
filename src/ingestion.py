@@ -94,7 +94,7 @@ class StreamIngestionService:
 
     parse_vtt_timestamp = _parse_vtt_timestamp
 
-    def _get_cookies_path(self, force_refresh: bool = False) -> Optional[str]:
+    def _get_cookies_path(self) -> Optional[str]:
         """
         Download YouTube cookies file from Azure Blob Storage on first use.
         Returns the local path to cookies.txt, or None if not configured.
@@ -105,8 +105,6 @@ class StreamIngestionService:
         container = settings.azure_blob_container
 
         if not conn_str or not blob_name:
-            if force_refresh:
-                return None
             # No Azure storage configured — check if cookies.txt exists locally
             local_cookies = Path("cookies.txt")
             if local_cookies.exists():
@@ -129,11 +127,7 @@ class StreamIngestionService:
             blob_size = blob.get_blob_properties().size
 
             # Re-use cache only if it exists AND matches blob size exactly
-            if (
-                not force_refresh
-                and cache_path.exists()
-                and cache_path.stat().st_size == blob_size
-            ):
+            if cache_path.exists() and cache_path.stat().st_size == blob_size:
                 logger.info("Using cached cookies at %s (%d bytes)", cache_path, cache_path.stat().st_size)
                 return str(cache_path)
 
@@ -151,22 +145,11 @@ class StreamIngestionService:
 
         except Exception as exc:
             logger.warning("Failed to download cookies from Blob: %s", exc)
-            if force_refresh:
-                return None
             # Fall back to existing cache if available
             if cache_path.exists() and cache_path.stat().st_size > 0:
                 logger.info("Falling back to existing cache at %s", cache_path)
                 return str(cache_path)
-            local_cookies = Path("cookies.txt")
-            if local_cookies.exists() and local_cookies.stat().st_size > 0:
-                logger.info("Falling back to local cookies.txt")
-                return str(local_cookies)
             return None
-
-    @staticmethod
-    def _is_youtube_bot_challenge(error: Exception) -> bool:
-        message = str(error).casefold().replace("\u2019", "'")
-        return "sign in to confirm" in message and "bot" in message
 
     def probe_metadata(self, url_or_path: str, retries: int = 3, **kwargs) -> VideoMetadata:
 
@@ -254,10 +237,8 @@ class StreamIngestionService:
         if settings.yt_dlp_proxy:
             ydl_opts["proxy"] = settings.yt_dlp_proxy
 
-        cookies_refresh_attempted = False
 
-        attempt = 0
-        while attempt < retries:
+        for attempt in range(retries):
 
             try:
 
@@ -404,41 +385,17 @@ class StreamIngestionService:
                     exc
                 )
 
-                if (
-                    is_youtube
-                    and not cookies_refresh_attempted
-                    and self._is_youtube_bot_challenge(exc)
-                ):
-                    cookies_refresh_attempted = True
-                    refreshed_cookies = self._get_cookies_path(force_refresh=True)
-                    if refreshed_cookies:
-                        ydl_opts["cookiefile"] = refreshed_cookies
-                        logger.warning(
-                            "YouTube bot challenge received; retrying metadata probe "
-                            "with a freshly downloaded cookies file"
-                        )
-                        retries += 1
-                        attempt += 1
-                        continue
 
-                if attempt + 1 >= retries:
+                if attempt == retries - 1:
 
-                    error_message = str(exc)
-                    if is_youtube and self._is_youtube_bot_challenge(exc):
-                        error_message = (
-                            "YouTube rejected the request with a bot-verification challenge. "
-                            "The application attempted one fresh cookie download when configured. "
-                            "Refresh the YouTube cookies in Azure Blob Storage or cookies.txt; "
-                            "if the challenge persists, check the request's network egress or "
-                            "configure an allowed proxy. "
-                            f"yt-dlp error: {exc}"
-                        )
                     raise IngestionError(
-                        f"Metadata probing failed: {error_message}"
+                        f"Metadata probing failed: {exc}"
                     )
 
-                time.sleep((attempt + 1) * 1.5)
-                attempt += 1
+
+                time.sleep(
+                    (attempt + 1) * 1.5
+                )
 
     def _resolve_direct_stream_url(self, url_or_path: str) -> str:
         """Resolves fresh streaming CDN link dynamically right before media processing."""
@@ -1021,46 +978,6 @@ class StreamIngestionService:
             timestamp_seconds
         )
 
-        local_video = Path(stream_url)
-        if local_video.is_file():
-            cap = cv2.VideoCapture(str(local_video))
-            try:
-                if not cap.isOpened():
-                    logger.warning(
-                        "Unable to open local video for frame extraction: %s",
-                        local_video,
-                    )
-                    return False
-
-                fps = cap.get(cv2.CAP_PROP_FPS)
-                frame_number = (
-                    int(max(0.0, timestamp_seconds) * fps)
-                    if fps > 0
-                    else 0
-                )
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
-                success, frame = cap.read()
-                if (
-                    success
-                    and frame is not None
-                    and cv2.imwrite(str(output_jpg), frame)
-                    and output_jpg.is_file()
-                    and output_jpg.stat().st_size > 0
-                ):
-                    logger.info(
-                        "Frame extracted from local video at %.3fs",
-                        timestamp_seconds,
-                    )
-                    return True
-            finally:
-                cap.release()
-
-            logger.warning(
-                "Unable to extract frame from local video at %.3fs: %s",
-                timestamp_seconds,
-                local_video,
-            )
-            return False
 
         # =====================================================
         # STEP 1: Resolve proper stream using yt-dlp

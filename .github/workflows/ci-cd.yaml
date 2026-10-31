@@ -29,7 +29,7 @@ jobs:
   # Blocks everything downstream if tests fail
   # ─────────────────────────────────────────────
   test:
-    name: Run 97 Pytest Tests
+    name: Run 86 Pytest Tests
     runs-on: ubuntu-latest
 
     steps:

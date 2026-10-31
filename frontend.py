@@ -1,7 +1,6 @@
 import os
 import tempfile
 from pathlib import Path
-from urllib.parse import urlparse
 
 import httpx
 from nicegui import ui
@@ -51,35 +50,6 @@ def _reset_state(url: str, target_text: str) -> None:
         "confidence_score": None, "tier_executed": None,
         "extracted_text": None, "url": url, "error": None, "has_frame": False,
     })
-
-def _is_youtube_bot_error(url: str | None, error: str | None) -> bool:
-    hostname = (urlparse(url or "").hostname or "").lower()
-    is_youtube = hostname == "youtube.com" or hostname.endswith(
-        (".youtube.com", ".youtu.be")
-    ) or hostname == "youtu.be"
-    message = (error or "").casefold()
-    return is_youtube and "not a bot" in message and "sign in" in message
-
-def _powershell_quote(value: str) -> str:
-    return "'" + value.replace("'", "''") + "'"
-
-def _youtube_relay_command(url: str, target_text: str) -> str:
-    return (
-        "python tools\\submit_youtube_url.py `\n"
-        f"  --url {_powershell_quote(url)} `\n"
-        f"  --target-text {_powershell_quote(target_text)} `\n"
-        "  --confirm-authorized"
-    )
-
-def _youtube_cookie_fallback_command(url: str, target_text: str) -> str:
-    return (
-        _youtube_relay_command(url, target_text).removesuffix(
-            "  --confirm-authorized"
-        )
-        + " `\n"
-        "  --cookies-file 'C:\\path\\to\\youtube-cookies.txt' `\n"
-        "  --confirm-authorized"
-    )
 
 # ──────────────────────────────────────────────
 # API
@@ -318,12 +288,7 @@ def dashboard() -> None:
                 status_label.classes("text-gray-200", remove="text-emerald-300 text-red-300")
 
             job_id_label.text  = state["job_id"] or ""
-            blocked_youtube = _is_youtube_bot_error(state["url"], state["error"])
-            error_label.text = (
-                "YouTube blocked the cloud fetch; no frame was captured."
-                if blocked_youtube
-                else state["error"] or ""
-            )
+            error_label.text   = state["error"]  or ""
 
             # ── result ──
             result_inner.clear()
@@ -403,39 +368,7 @@ def dashboard() -> None:
                         ui.label("Detection Failed").classes(
                             "text-lg font-semibold text-red-400"
                         )
-                        if blocked_youtube:
-                            ui.label(
-                                "Run the video fetch locally, then Quest1 will analyze the uploaded video."
-                            ).classes(
-                                "text-sm text-gray-400 text-center max-w-lg"
-                            )
-                            ui.code(
-                                _youtube_relay_command(
-                                    state["url"],
-                                    state["target_dialogue"],
-                                ),
-                                language="powershell",
-                            ).classes("w-full max-w-2xl")
-                            ui.label(
-                                "If anonymous local access is also rejected, retry with a fresh "
-                                "YouTube cookie file. Cookies stay on your machine and are not uploaded."
-                            ).classes(
-                                "text-xs text-gray-500 text-center max-w-lg"
-                            )
-                            ui.code(
-                                _youtube_cookie_fallback_command(
-                                    state["url"],
-                                    state["target_dialogue"],
-                                ),
-                                language="powershell",
-                            ).classes("w-full max-w-2xl")
-                            with ui.expansion("Technical details").classes(
-                                "w-full max-w-2xl text-gray-500"
-                            ):
-                                ui.label(state["error"]).classes(
-                                    "text-xs break-all"
-                                )
-                        elif state["error"]:
+                        if state["error"]:
                             ui.label(state["error"]).classes(
                                 "text-xs text-gray-500 text-center max-w-sm break-all"
                             )
