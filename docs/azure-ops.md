@@ -278,10 +278,10 @@ az containerapp show --name quest1-api --resource-group quest1-rg `
 
 ## 7. YouTube Cookies Maintenance
 
-YouTube rotates session cookies periodically (every few weeks). When you see:
+YouTube can reject requests with a bot-verification challenge or invalidate session cookies. The metadata probe now bypasses its cookie cache and retries once with a fresh Azure Blob download when it sees this challenge. When you see:
 
 ```
-"The provided YouTube account cookies are no longer valid"
+"Sign in to confirm you’re not a bot"
 ```
 
 **Steps to refresh:**
@@ -305,10 +305,13 @@ az containerapp update --name quest1-api --resource-group quest1-rg `
   --set-env-vars COOKIES_REFRESH="$(Get-Date -Format 'yyyyMMddHHmm')" --output none
 ```
 
+If the challenge continues after refreshing cookies, YouTube may be blocking the container's network egress. Check the `YT_DLP_PROXY` setting and verify that the configured proxy/network is permitted to access YouTube.
+
 **How the app validates cookies:**
 - On first request per container boot, downloads `cookies.txt` from blob
 - Compares local cache size against blob size — if they differ, re-downloads
 - This prevents yt-dlp from overwriting the cache with a stripped version
+- On a bot-verification challenge, bypasses the size check and downloads the blob again before retrying
 
 ---
 

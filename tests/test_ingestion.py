@@ -287,6 +287,52 @@ Hello world
         with pytest.raises(IngestionError, match="Metadata probing failed: Network blocked"):
             service.probe_metadata("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
 
+    @patch.object(
+        StreamIngestionService,
+        "_get_cookies_path",
+        side_effect=["stale-cookies.txt", "refreshed-cookies.txt"],
+    )
+    @patch("yt_dlp.YoutubeDL")
+    def test_probe_metadata_refreshes_cookies_after_youtube_bot_challenge(
+        self, mock_ydl_cls, mock_get_cookies
+    ):
+        first_ydl = MagicMock()
+        first_ydl.extract_info.side_effect = Exception(
+            "Sign in to confirm you’re not a bot"
+        )
+        refreshed_ydl = MagicMock()
+        refreshed_ydl.extract_info.return_value = {
+            "duration": 120.0,
+            "fps": 30.0,
+            "subtitles": {},
+            "formats": [
+                {
+                    "vcodec": "h264",
+                    "acodec": "aac",
+                    "url": "https://googlevideo.com/stream",
+                }
+            ],
+        }
+        mock_ydl_cls.return_value.__enter__.side_effect = [first_ydl, refreshed_ydl]
+        ydl_options = []
+
+        def capture_ydl_options(options):
+            ydl_options.append(dict(options))
+            return mock_ydl_cls.return_value
+
+        mock_ydl_cls.side_effect = capture_ydl_options
+
+        service = StreamIngestionService()
+        metadata = service.probe_metadata(
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            retries=1,
+        )
+
+        assert metadata.stream_path == "https://googlevideo.com/stream"
+        assert ydl_options[0]["cookiefile"] == "stale-cookies.txt"
+        assert ydl_options[1]["cookiefile"] == "refreshed-cookies.txt"
+        mock_get_cookies.assert_any_call(force_refresh=True)
+
     # 18. Local Audio Extraction Shortcut
     @patch("subprocess.run")
     def test_extract_audio_stream_local(self, mock_subprocess_run, tmp_path):

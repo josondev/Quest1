@@ -94,7 +94,7 @@ class StreamIngestionService:
 
     parse_vtt_timestamp = _parse_vtt_timestamp
 
-    def _get_cookies_path(self) -> Optional[str]:
+    def _get_cookies_path(self, force_refresh: bool = False) -> Optional[str]:
         """
         Download YouTube cookies file from Azure Blob Storage on first use.
         Returns the local path to cookies.txt, or None if not configured.
@@ -105,6 +105,8 @@ class StreamIngestionService:
         container = settings.azure_blob_container
 
         if not conn_str or not blob_name:
+            if force_refresh:
+                return None
             # No Azure storage configured — check if cookies.txt exists locally
             local_cookies = Path("cookies.txt")
             if local_cookies.exists():
@@ -127,7 +129,11 @@ class StreamIngestionService:
             blob_size = blob.get_blob_properties().size
 
             # Re-use cache only if it exists AND matches blob size exactly
-            if cache_path.exists() and cache_path.stat().st_size == blob_size:
+            if (
+                not force_refresh
+                and cache_path.exists()
+                and cache_path.stat().st_size == blob_size
+            ):
                 logger.info("Using cached cookies at %s (%d bytes)", cache_path, cache_path.stat().st_size)
                 return str(cache_path)
 
@@ -145,11 +151,22 @@ class StreamIngestionService:
 
         except Exception as exc:
             logger.warning("Failed to download cookies from Blob: %s", exc)
+            if force_refresh:
+                return None
             # Fall back to existing cache if available
             if cache_path.exists() and cache_path.stat().st_size > 0:
                 logger.info("Falling back to existing cache at %s", cache_path)
                 return str(cache_path)
+            local_cookies = Path("cookies.txt")
+            if local_cookies.exists() and local_cookies.stat().st_size > 0:
+                logger.info("Falling back to local cookies.txt")
+                return str(local_cookies)
             return None
+
+    @staticmethod
+    def _is_youtube_bot_challenge(error: Exception) -> bool:
+        message = str(error).casefold().replace("\u2019", "'")
+        return "sign in to confirm" in message and "bot" in message
 
     def probe_metadata(self, url_or_path: str, retries: int = 3, **kwargs) -> VideoMetadata:
 
@@ -237,8 +254,10 @@ class StreamIngestionService:
         if settings.yt_dlp_proxy:
             ydl_opts["proxy"] = settings.yt_dlp_proxy
 
+        cookies_refresh_attempted = False
 
-        for attempt in range(retries):
+        attempt = 0
+        while attempt < retries:
 
             try:
 
@@ -385,17 +404,41 @@ class StreamIngestionService:
                     exc
                 )
 
+                if (
+                    is_youtube
+                    and not cookies_refresh_attempted
+                    and self._is_youtube_bot_challenge(exc)
+                ):
+                    cookies_refresh_attempted = True
+                    refreshed_cookies = self._get_cookies_path(force_refresh=True)
+                    if refreshed_cookies:
+                        ydl_opts["cookiefile"] = refreshed_cookies
+                        logger.warning(
+                            "YouTube bot challenge received; retrying metadata probe "
+                            "with a freshly downloaded cookies file"
+                        )
+                        retries += 1
+                        attempt += 1
+                        continue
 
-                if attempt == retries - 1:
+                if attempt + 1 >= retries:
 
+                    error_message = str(exc)
+                    if is_youtube and self._is_youtube_bot_challenge(exc):
+                        error_message = (
+                            "YouTube rejected the request with a bot-verification challenge. "
+                            "The application attempted one fresh cookie download when configured. "
+                            "Refresh the YouTube cookies in Azure Blob Storage or cookies.txt; "
+                            "if the challenge persists, check the request's network egress or "
+                            "configure an allowed proxy. "
+                            f"yt-dlp error: {exc}"
+                        )
                     raise IngestionError(
-                        f"Metadata probing failed: {exc}"
+                        f"Metadata probing failed: {error_message}"
                     )
 
-
-                time.sleep(
-                    (attempt + 1) * 1.5
-                )
+                time.sleep((attempt + 1) * 1.5)
+                attempt += 1
 
     def _resolve_direct_stream_url(self, url_or_path: str) -> str:
         """Resolves fresh streaming CDN link dynamically right before media processing."""
