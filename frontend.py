@@ -61,9 +61,32 @@ async def submit_job(url: str, target_text: str) -> None:
     except Exception as exc:
         state["status"] = "failed"
         state["error"]  = str(exc)
+
+async def submit_uploaded_bytes(
+    filename: str,
+    file_bytes: bytes,
+    content_type: str,
+    target_text: str,
+) -> None:
+    _reset_state(filename, target_text)
+    try:
+        timeout = httpx.Timeout(300.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(
+                f"{BACKEND_URL}/api/v1/jobs/upload",
+                data={"target_text": target_text},
+                files={"file": (filename, file_bytes, content_type)},
+            )
+            response.raise_for_status()
+        data = response.json()
+        state["job_id"] = data.get("job_id")
+        state["status"] = data.get("status")
+    except Exception as exc:
+        state["status"] = "failed"
+        state["error"] = str(exc)
+
 async def submit_uploaded_job(event: UploadEventArguments, target_text: str) -> None:
     filename = Path(event.name).name  # event.name not event.file.name
-    _reset_state(filename, target_text)
     try:
         # event.content holds the raw bytes — no .save() needed
         file_bytes = event.content.read()
@@ -73,19 +96,7 @@ async def submit_uploaded_job(event: UploadEventArguments, target_text: str) -> 
             return
 
         content_type = getattr(event, "type", "video/mp4")
-        timeout = httpx.Timeout(300.0)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(
-                f"{BACKEND_URL}/api/v1/jobs/upload",
-                data={"target_text": target_text},
-                files={
-                    "file": (filename, file_bytes, content_type)
-                },
-            )
-            response.raise_for_status()
-        data = response.json()
-        state["job_id"] = data.get("job_id")
-        state["status"] = data.get("status")
+        await submit_uploaded_bytes(filename, file_bytes, content_type, target_text)
     except Exception as exc:
         state["status"] = "failed"
         state["error"] = str(exc)
@@ -181,12 +192,18 @@ def dashboard() -> None:
             ui.label(
                 "Or upload an authorized video (submits when selected)"
             ).classes("text-xs text-gray-500 mt-4")
+            pending_upload: dict = {}
 
             async def handle_upload(event: UploadEventArguments) -> None:
                 text = dialogue_text.value.strip()
                 if not text:
+                    pending_upload.update({
+                        "filename": Path(event.name).name,
+                        "file_bytes": event.content.read(),
+                        "content_type": getattr(event, "type", "video/mp4"),
+                    })
                     ui.notify(
-                        "Enter Target Dialogue before uploading a video.",
+                        "Enter Target Dialogue, then click Run Detection.",
                         type="warning",
                         position="top",
                     )
@@ -366,6 +383,19 @@ def dashboard() -> None:
                 )
                 return
             if not url and state["job_id"]:
+                refresh_ui()
+                return
+            if not url and pending_upload:
+                run_btn.props("loading")
+                upload = pending_upload.copy()
+                pending_upload.clear()
+                await submit_uploaded_bytes(
+                    upload["filename"],
+                    upload["file_bytes"],
+                    upload["content_type"],
+                    text,
+                )
+                run_btn.props(remove="loading")
                 refresh_ui()
                 return
             run_btn.props("loading")
