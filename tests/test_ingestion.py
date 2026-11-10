@@ -241,6 +241,31 @@ Hello world
         assert meta.duration_seconds == 30.0
         mock_cap.release.assert_called_once()
 
+    @patch("yt_dlp.YoutubeDL")
+    @patch("cv2.imwrite", return_value=True)
+    @patch("cv2.VideoCapture")
+    def test_extract_frame_local_file_bypasses_yt_dlp(
+        self, mock_cap_cls, mock_imwrite, mock_ydl_cls, tmp_path
+    ):
+        local_file = tmp_path / "test_video.mp4"
+        local_file.write_bytes(b"video")
+        output_file = tmp_path / "frame.jpg"
+
+        mock_cap = MagicMock()
+        mock_cap_cls.return_value = mock_cap
+        mock_cap.isOpened.return_value = True
+        mock_cap.get.return_value = 25.0
+        mock_cap.read.return_value = (True, object())
+
+        result = StreamIngestionService().extract_frame_on_demand(
+            str(local_file), 0.2, output_file
+        )
+
+        assert result is True
+        mock_cap.set.assert_called_once()
+        mock_imwrite.assert_called_once_with(str(output_file), mock_cap.read.return_value[1])
+        mock_ydl_cls.assert_not_called()
+
     # 15. Unopenable Local Video Probing Rejection
     @patch("cv2.VideoCapture")
     def test_probe_metadata_local_file_unopenable_raises_error(self, mock_cap_cls, tmp_path):

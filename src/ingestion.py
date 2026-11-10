@@ -963,6 +963,23 @@ class StreamIngestionService:
             exist_ok=True
         )
 
+        local_path = Path(stream_url)
+        if not stream_url.startswith("http") and local_path.exists():
+            cap = cv2.VideoCapture(str(local_path))
+            if not cap.isOpened():
+                return False
+
+            try:
+                fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+                cap.set(
+                    cv2.CAP_PROP_POS_FRAMES,
+                    int(timestamp_seconds * fps),
+                )
+                success, frame = cap.read()
+                return bool(success and frame is not None and cv2.imwrite(str(output_jpg), frame))
+            finally:
+                cap.release()
+
         user_agent = (
             "Mozilla/5.0 "
             "(Windows NT 10.0; Win64; x64) "
