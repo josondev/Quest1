@@ -351,12 +351,22 @@ def dashboard() -> None:
         async def run_detection() -> None:
             url  = video_url.value.strip()
             text = dialogue_text.value.strip()
-            if not url or not text:
+            if not text:
                 ui.notify(
-                    "Please enter both a Video URL and Target Dialogue.",
+                    "Please enter Target Dialogue.",
                     type="warning",
                     position="top",
                 )
+                return
+            if not url and not state["job_id"]:
+                ui.notify(
+                    "Please enter a Video URL or upload a video.",
+                    type="warning",
+                    position="top",
+                )
+                return
+            if not url and state["job_id"]:
+                refresh_ui()
                 return
             run_btn.props("loading")
             await submit_job(url, text)
