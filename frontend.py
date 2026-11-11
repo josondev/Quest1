@@ -1,16 +1,16 @@
-import os
+﻿import os
 from pathlib import Path
 import httpx
 from nicegui import ui
 from nicegui.events import UploadEventArguments
 from src.config import settings
-# ──────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # CONFIG
-# ──────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://127.0.0.1:8000")
 POLL_INTERVAL_SECONDS = 1.5
 TERMINAL_STATUSES = {"completed", "failed", "success", "done"}
-# Tier labels → short readable names
+# Tier labels â†’ short readable names
 TIER_LABELS = {
     "Tier 0: Embedded Subtitle Match":   ("T0", "Subtitle"),
     "Tier 1: STT Acoustic Match":        ("T1", "Speech"),
@@ -18,9 +18,9 @@ TIER_LABELS = {
     "Tier 3: Dense Onset OCR Confirmation": ("T3", "OCR Dense"),
     "Tier 4: VLM Arbiter Fallback":      ("T4", "Vision AI"),
 }
-# ──────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # STATE
-# ──────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 state: dict = {
     "job_id": None,
     "status": None,
@@ -43,9 +43,9 @@ def _reset_state(url: str, target_text: str) -> None:
         "confidence_score": None, "tier_executed": None,
         "extracted_text": None, "url": url, "error": None, "has_frame": False,
     })
-# ──────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # API
-# ──────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async def submit_job(url: str, target_text: str) -> None:
     _reset_state(url, target_text)
     try:
@@ -118,13 +118,13 @@ async def poll_job_status() -> None:
             state["has_frame"]           = bool(data.get("frame_image_path"))
     except Exception as exc:
         state["error"] = str(exc)
-# ──────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # HELPERS
-# ──────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def _tier_badge(tier_raw: str | None) -> tuple[str, str]:
     """Return (short_code, label) for a tier string."""
     if not tier_raw:
-        return ("—", "—")
+        return ("â€”", "â€”")
     return TIER_LABELS.get(tier_raw, ("T?", tier_raw))
 def _confidence_color(score: float) -> str:
     if score >= 0.85: return "text-emerald-400"
@@ -134,13 +134,13 @@ def _stat_card(label: str, value: str, color: str = "text-white") -> None:
     with ui.column().classes("items-center gap-0"):
         ui.label(value).classes(f"text-2xl font-bold {color}")
         ui.label(label).classes("text-xs text-gray-500 uppercase tracking-widest")
-# ──────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # PAGE
-# ──────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @ui.page("/")
 def dashboard() -> None:
-    ui.page_title("Quest1 · Dialogue Detection")
-    # ── global dark background ──
+    ui.page_title("Quest1 Â· Dialogue Detection")
+    # â”€â”€ global dark background â”€â”€
     ui.add_head_html("""
     <style>
       body { background:#0f1117; }
@@ -154,9 +154,9 @@ def dashboard() -> None:
       .nicegui-content { padding:0 !important; }
     </style>
     """)
-    # ── outer wrapper ──
+    # â”€â”€ outer wrapper â”€â”€
     with ui.column().classes("w-full min-h-screen items-center pb-16 px-4"):
-        # ── HERO ────────────────────────────────────────────────────────────────
+        # â”€â”€ HERO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         with ui.column().classes("items-center mt-14 mb-10 text-center"):
             ui.label("Quest1").classes(
                 "text-6xl font-black tracking-tight"
@@ -167,10 +167,10 @@ def dashboard() -> None:
                 "text-xl font-semibold text-gray-300 mt-1"
             )
             ui.label(
-                "Locate any spoken or visual dialogue inside a video — "
+                "Locate any spoken or visual dialogue inside a video â€” "
                 "timestamp, frame, and confidence score."
             ).classes("text-sm text-gray-500 mt-2 max-w-lg")
-        # ── INPUT CARD ──────────────────────────────────────────────────────────
+        # â”€â”€ INPUT CARD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         with ui.card().classes(
             "w-full max-w-2xl rounded-2xl p-8 gap-0"
             " border border-gray-800"
@@ -179,7 +179,7 @@ def dashboard() -> None:
                 "text-lg font-semibold text-gray-200 mb-6"
             )
             video_url = (
-                ui.input(placeholder="https://youtu.be/…  or any video URL")
+                ui.input(placeholder="https://youtu.be/â€¦  or any video URL")
                 .props('outlined dense label="Video URL" color="indigo"')
                 .classes("w-full")
             )
@@ -212,15 +212,22 @@ def dashboard() -> None:
                 await submit_uploaded_job(event, text)
                 refresh_ui()
 
+            def handle_rejected() -> None:
+                ui.notify(
+                    "File rejected — check the file is a valid video format and under 250 MB.",
+                    type="negative",
+                    position="top",
+                )
+
             video_upload = ui.upload(
                 on_upload=handle_upload,
+                on_rejected=handle_rejected,
                 auto_upload=True,
-                max_file_size=settings.max_video_upload_bytes,
             ).props(
-                'accept=".3gp,.avi,.flv,.m4v,.mkv,.mov,.mp4,.mpeg,.mpg,.ts,.webm"'
+                'accept="video/*" max-file-size="262144000"'
             ).classes("w-full mt-2")
             run_btn = (
-                ui.button("🔍  Run Detection")
+                ui.button("ðŸ”  Run Detection")
                 .classes(
                     "w-full mt-6 py-3 rounded-xl text-base font-semibold"
                     " text-white"
@@ -231,7 +238,7 @@ def dashboard() -> None:
                 )
                 .props("unelevated")
             )
-        # ── STATUS + RESULT AREA ────────────────────────────────────────────────
+        # â”€â”€ STATUS + RESULT AREA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         status_card   = ui.card().classes(
             "w-full max-w-2xl rounded-2xl p-6 mt-4"
             " border border-gray-800"
@@ -240,13 +247,13 @@ def dashboard() -> None:
             "w-full max-w-2xl rounded-2xl p-8 mt-4"
             " border border-gray-800"
         ).style("background:#161b27; display:none")
-        # ── STATUS CARD CONTENTS ────────────────────────────────────────────────
+        # â”€â”€ STATUS CARD CONTENTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         with status_card:
             with ui.row().classes("w-full items-center gap-3"):
                 status_dot   = ui.element("div").classes(
                     "w-2.5 h-2.5 rounded-full bg-yellow-400"
                 ).style("flex-shrink:0")
-                status_label = ui.label("Processing…").classes(
+                status_label = ui.label("Processingâ€¦").classes(
                     "text-sm font-semibold text-gray-200"
                 )
                 ui.space()
@@ -256,20 +263,20 @@ def dashboard() -> None:
             error_label = ui.label("").classes(
                 "text-sm text-red-400 mt-3 break-all"
             )
-        # ── RESULT CARD CONTENTS ────────────────────────────────────────────────
+        # â”€â”€ RESULT CARD CONTENTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         with result_card:
             result_inner = ui.column().classes("w-full gap-5")
-        # ───────────────────────────────────────────────────────────────────────
+        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         # REFRESH UI
-        # ───────────────────────────────────────────────────────────────────────
+        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         def refresh_ui() -> None:
             s = state["status"]
-            # ── show/hide cards ──
+            # â”€â”€ show/hide cards â”€â”€
             status_card.style(
                 "background:#161b27;" +
                 ("display:block" if s else "display:none")
             )
-            # ── status dot colour ──
+            # â”€â”€ status dot colour â”€â”€
             if s in ("completed", "success", "done"):
                 status_dot.classes("bg-emerald-400", remove="bg-yellow-400 bg-red-400")
                 status_label.text = "Completed"
@@ -281,11 +288,11 @@ def dashboard() -> None:
             else:
                 status_dot.classes("bg-yellow-400 animate-pulse",
                                    remove="bg-emerald-400 bg-red-400")
-                status_label.text = "Processing…"
+                status_label.text = "Processingâ€¦"
                 status_label.classes("text-gray-200", remove="text-emerald-300 text-red-300")
             job_id_label.text  = state["job_id"] or ""
             error_label.text   = state["error"]  or ""
-            # ── result ──
+            # â”€â”€ result â”€â”€
             result_inner.clear()
             if s == "completed":
                 result_card.style("background:#161b27; display:block")
@@ -298,7 +305,7 @@ def dashboard() -> None:
                         ui.label("Detection Result").classes(
                             "text-lg font-semibold text-gray-200"
                         )
-                        ui.badge(f"✔  {tier_code} · {tier_name}").classes(
+                        ui.badge(f"âœ”  {tier_code} Â· {tier_name}").classes(
                             "bg-indigo-600 text-white text-xs px-3 py-1 rounded-full"
                         )
                     # stats row
@@ -307,12 +314,12 @@ def dashboard() -> None:
                     ).style("background:#0f1117"):
                         _stat_card(
                             "Timestamp",
-                            state["formatted_timestamp"] or "—",
+                            state["formatted_timestamp"] or "â€”",
                             "text-yellow-300",
                         )
                         _stat_card(
                             "Frame",
-                            f"#{state['frame_number']}" if state["frame_number"] is not None else "—",
+                            f"#{state['frame_number']}" if state["frame_number"] is not None else "â€”",
                             "text-blue-300",
                         )
                         _stat_card(
@@ -353,7 +360,7 @@ def dashboard() -> None:
                     with ui.column().classes(
                         "w-full items-center py-8 gap-3"
                     ):
-                        ui.label("✕").classes("text-5xl text-red-500")
+                        ui.label("âœ•").classes("text-5xl text-red-500")
                         ui.label("Detection Failed").classes(
                             "text-lg font-semibold text-red-400"
                         )
@@ -363,9 +370,9 @@ def dashboard() -> None:
                             )
             else:
                 result_card.style("background:#161b27; display:none")
-        # ───────────────────────────────────────────────────────────────────────
+        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         # BUTTON CLICK
-        # ───────────────────────────────────────────────────────────────────────
+        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         async def run_detection() -> None:
             url  = video_url.value.strip()
             text = dialogue_text.value.strip()
@@ -404,18 +411,18 @@ def dashboard() -> None:
             run_btn.props(remove="loading")
             refresh_ui()
         run_btn.on_click(run_detection)
-        # ───────────────────────────────────────────────────────────────────────
+        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         # POLL TIMER
-        # ───────────────────────────────────────────────────────────────────────
+        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         async def update_loop() -> None:
             await poll_job_status()
             refresh_ui()
         ui.timer(POLL_INTERVAL_SECONDS, update_loop)
-# ──────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # ENTRY POINT
-# ──────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 ui.run(
-    title="Quest1 · Dialogue Detection",
+    title="Quest1 Â· Dialogue Detection",
     port=8080,
     reload=False,
     dark=True,
