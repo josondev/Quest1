@@ -25,40 +25,11 @@ env:
 
 jobs:
   # -----------------------------------------
-  # JOB 1 - Run full test suite
-  # Blocks everything downstream if tests fail
-  # -----------------------------------------
-  test:
-    name: Run Pytest Tests
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install system deps (FFmpeg)
-        run: |
-          sudo find /etc/apt -type f -print0 | \
-            sudo xargs -0 sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g'
-          sudo apt-get update -o Acquire::Retries=3
-          sudo apt-get install -y ffmpeg
-
-      - name: Install Python deps
-        run: pip install -r requirements.txt
-
-      - name: Run test suite
-        run: pytest --tb=short -q
-
-  # -----------------------------------------
-  # JOB 2 - Build Docker image + push to ACR
-  # Only runs on Rex branch push, after tests pass
+  # JOB 1 - Build Docker image + push to ACR
+  # Tests run inside Docker build (apt works there)
   # -----------------------------------------
   build-push:
     name: Build & Push to ACR
-    needs: test
     if: github.ref == 'refs/heads/Rex' && github.event_name == 'push'
     runs-on: ubuntu-latest
 
@@ -82,7 +53,7 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
 
   # -----------------------------------------
-  # JOB 3 - Deploy to Azure Container Apps
+  # JOB 2 - Deploy to Azure Container Apps
   # Only runs after image is pushed
   # -----------------------------------------
   deploy:
@@ -114,11 +85,11 @@ jobs:
             --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
 
   # -----------------------------------------
-  # JOB 4 - Deploy GitHub Pages showcase
+  # JOB 3 - Deploy GitHub Pages showcase
   # -----------------------------------------
   deploy-pages:
     name: Deploy GitHub Pages
-    needs: test
+    needs: build-push
     if: github.ref == 'refs/heads/Rex' && github.event_name == 'push'
     environment:
       name: github-pages
