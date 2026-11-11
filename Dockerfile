@@ -3,11 +3,12 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Switch to reliable mirrors and install system dependencies
-# Uses sed to replace azure mirror with main ubuntu archive before apt-get
-RUN sed -i 's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
-        /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null || true \
-    && apt-get update --fix-missing \
+# Prefer the Ubuntu main archive if an image source points at the Azure mirror.
+# Noble can store mirror definitions in /etc/apt/apt-mirrors.txt, so update it
+# alongside conventional .list and .sources files before refreshing APT.
+RUN find /etc/apt -type f \( -name '*.list' -o -name '*.sources' -o -name 'apt-mirrors.txt' \) -print0 \
+    | xargs -r -0 sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' \
+    && apt-get update -o Acquire::Retries=3 \
     && apt-get install -y --no-install-recommends \
         ffmpeg \
         libgl1 \
