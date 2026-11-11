@@ -24,10 +24,10 @@ env:
   UI_APP_NAME: quest1-ui
 
 jobs:
-  # ─────────────────────────────────────────────
+  # -----------------------------------------
   # JOB 1 - Run full test suite
   # Blocks everything downstream if tests fail
-  # ─────────────────────────────────────────────
+  # -----------------------------------------
   test:
     name: Run Pytest Tests
     runs-on: ubuntu-latest
@@ -41,10 +41,10 @@ jobs:
 
       - name: Install system deps (FFmpeg)
         run: |
-          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
-            /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null || true
-          sudo apt-get update --fix-missing
-          sudo apt-get install -y --no-install-recommends ffmpeg
+          sudo find /etc/apt -type f -print0 | \
+            sudo xargs -0 sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g'
+          sudo apt-get update -o Acquire::Retries=3
+          sudo apt-get install -y ffmpeg
 
       - name: Install Python deps
         run: pip install -r requirements.txt
@@ -52,10 +52,10 @@ jobs:
       - name: Run test suite
         run: pytest --tb=short -q
 
-  # ─────────────────────────────────────────────
+  # -----------------------------------------
   # JOB 2 - Build Docker image + push to ACR
   # Only runs on Rex branch push, after tests pass
-  # ─────────────────────────────────────────────
+  # -----------------------------------------
   build-push:
     name: Build & Push to ACR
     needs: test
@@ -81,10 +81,10 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
 
-  # ─────────────────────────────────────────────
+  # -----------------------------------------
   # JOB 3 - Deploy to Azure Container Apps
   # Only runs after image is pushed
-  # ─────────────────────────────────────────────
+  # -----------------------------------------
   deploy:
     name: Deploy to Azure Container Apps
     needs: build-push
@@ -113,9 +113,9 @@ jobs:
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
 
-  # ─────────────────────────────────────────────
+  # -----------------------------------------
   # JOB 4 - Deploy GitHub Pages showcase
-  # ─────────────────────────────────────────────
+  # -----------------------------------------
   deploy-pages:
     name: Deploy GitHub Pages
     needs: test
