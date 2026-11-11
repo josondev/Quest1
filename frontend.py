@@ -1,55 +1,51 @@
-﻿import os
+import os
 from pathlib import Path
 import httpx
 from nicegui import ui
 from nicegui.events import UploadEventArguments
 from src.config import settings
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# CONFIG
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://127.0.0.1:8000")
 POLL_INTERVAL_SECONDS = 1.5
 TERMINAL_STATUSES = {"completed", "failed", "success", "done"}
-# Tier labels â†’ short readable names
+
 TIER_LABELS = {
-    "Tier 0: Embedded Subtitle Match":   ("T0", "Subtitle"),
-    "Tier 1: STT Acoustic Match":        ("T1", "Speech"),
-    "Tier 2: Sparse Timeline OCR Match": ("T2", "OCR Scan"),
+    "Tier 0: Embedded Subtitle Match":      ("T0", "Subtitle"),
+    "Tier 1: STT Acoustic Match":           ("T1", "Speech"),
+    "Tier 2: Sparse Timeline OCR Match":    ("T2", "OCR Scan"),
     "Tier 3: Dense Onset OCR Confirmation": ("T3", "OCR Dense"),
-    "Tier 4: VLM Arbiter Fallback":      ("T4", "Vision AI"),
+    "Tier 4: VLM Arbiter Fallback":         ("T4", "Vision AI"),
 }
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# HELPERS
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-def _tier_badge(tier_raw: str | None) -> tuple[str, str]:
-    """Return (short_code, label) for a tier string."""
+
+def _tier_badge(tier_raw):
     if not tier_raw:
-        return ("â€”", "â€”")
+        return ("-", "-")
     return TIER_LABELS.get(tier_raw, ("T?", tier_raw))
-def _confidence_color(score: float) -> str:
+
+def _confidence_color(score):
     if score >= 0.85: return "text-emerald-400"
     if score >= 0.65: return "text-yellow-400"
     return "text-red-400"
-def _stat_card(label: str, value: str, color: str = "text-white") -> None:
+
+def _stat_card(label, value, color="text-white"):
     with ui.column().classes("items-center gap-0"):
         ui.label(value).classes(f"text-2xl font-bold {color}")
         ui.label(label).classes("text-xs text-gray-500 uppercase tracking-widest")
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# PAGE
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
 @ui.page("/")
-def dashboard() -> None:
-    ui.page_title("Quest1 Â· Dialogue Detection")
-    # ── per-session state (each browser tab gets its own) ──
-    state: dict = {
+def dashboard():
+    ui.page_title("Quest1 - Dialogue Detection")
+
+    state = {
         "job_id": None, "status": None, "target_dialogue": None,
         "formatted_timestamp": None, "timestamp_seconds": None,
         "frame_number": None, "confidence_score": None,
         "tier_executed": None, "extracted_text": None,
         "url": None, "error": None, "has_frame": False,
     }
+    pending_upload = {}
 
-    def _reset_state(url: str, target_text: str) -> None:
+    def _reset_state(url, target_text):
         state.update({
             "job_id": None, "status": "processing",
             "target_dialogue": target_text, "formatted_timestamp": None,
@@ -58,7 +54,7 @@ def dashboard() -> None:
             "extracted_text": None, "url": url, "error": None, "has_frame": False,
         })
 
-    async def submit_job(url: str, target_text: str) -> None:
+    async def submit_job(url, target_text):
         _reset_state(url, target_text)
         try:
             async with httpx.AsyncClient(timeout=30) as client:
@@ -74,13 +70,10 @@ def dashboard() -> None:
             state["status"] = "failed"
             state["error"] = str(exc)
 
-    async def submit_uploaded_bytes(
-        filename: str, file_bytes: bytes, content_type: str, target_text: str,
-    ) -> None:
+    async def submit_uploaded_bytes(filename, file_bytes, content_type, target_text):
         _reset_state(filename, target_text)
         try:
-            timeout = httpx.Timeout(300.0)
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client:
                 response = await client.post(
                     f"{BACKEND_URL}/api/v1/jobs/upload",
                     data={"target_text": target_text},
@@ -94,22 +87,7 @@ def dashboard() -> None:
             state["status"] = "failed"
             state["error"] = str(exc)
 
-    async def submit_uploaded_job(event: UploadEventArguments, target_text: str) -> None:
-        uploaded_file = event.file
-        filename = Path(uploaded_file.name).name
-        try:
-            file_bytes = await uploaded_file.read()
-            if not file_bytes:
-                state["status"] = "failed"
-                state["error"] = "Uploaded file is empty."
-                return
-            content_type = uploaded_file.content_type or "video/mp4"
-            await submit_uploaded_bytes(filename, file_bytes, content_type, target_text)
-        except Exception as exc:
-            state["status"] = "failed"
-            state["error"] = str(exc)
-
-    async def poll_job_status() -> None:
+    async def poll_job_status():
         if not state["job_id"] or state["status"] in TERMINAL_STATUSES:
             return
         try:
@@ -127,7 +105,7 @@ def dashboard() -> None:
                 state["has_frame"]           = bool(data.get("frame_image_path"))
         except Exception as exc:
             state["error"] = str(exc)
-    # â”€â”€ global dark background â”€â”€
+
     ui.add_head_html("""
     <style>
       body { background:#0f1117; }
@@ -141,9 +119,9 @@ def dashboard() -> None:
       .nicegui-content { padding:0 !important; }
     </style>
     """)
-    # â”€â”€ outer wrapper â”€â”€
+
     with ui.column().classes("w-full min-h-screen items-center pb-16 px-4"):
-        # â”€â”€ HERO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
         with ui.column().classes("items-center mt-14 mb-10 text-center"):
             ui.label("Quest1").classes(
                 "text-6xl font-black tracking-tight"
@@ -154,19 +132,20 @@ def dashboard() -> None:
                 "text-xl font-semibold text-gray-300 mt-1"
             )
             ui.label(
-                "Locate any spoken or visual dialogue inside a video â€” "
-                "timestamp, frame, and confidence score."
+                "Locate any spoken or visual dialogue inside a video"
+                " — timestamp, frame, and confidence score."
             ).classes("text-sm text-gray-500 mt-2 max-w-lg")
-        # â”€â”€ INPUT CARD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
         with ui.card().classes(
-            "w-full max-w-2xl rounded-2xl p-8 gap-0"
-            " border border-gray-800"
+            "w-full max-w-2xl rounded-2xl p-8 gap-0 border border-gray-800"
         ).style("background:#161b27"):
+
             ui.label("New Detection Job").classes(
                 "text-lg font-semibold text-gray-200 mb-6"
             )
+
             video_url = (
-                ui.input(placeholder="https://youtu.be/â€¦  or any video URL")
+                ui.input(placeholder="https://youtu.be/...  or any video URL")
                 .props('outlined dense label="Video URL" color="indigo"')
                 .classes("w-full")
             )
@@ -176,94 +155,82 @@ def dashboard() -> None:
                 .props('outlined dense label="Target Dialogue" color="indigo"')
                 .classes("w-full mt-3")
             )
-            ui.label(
-                "Or upload an authorized video (submits when selected)"
-            ).classes("text-xs text-gray-500 mt-4")
-            pending_upload: dict = {}
 
-            async def handle_upload(event: UploadEventArguments) -> None:
+            ui.label("Or upload a video file (MP4, MOV, MKV, WebM)").classes(
+                "text-xs text-gray-500 mt-4"
+            )
+
+            async def handle_upload(event: UploadEventArguments):
                 text = dialogue_text.value.strip()
+                uploaded_file = event.file
+                file_bytes = await uploaded_file.read()
+                content_type = uploaded_file.content_type or "video/mp4"
+                filename = Path(uploaded_file.name).name
+
                 if not text:
-                    uploaded_file = event.file
                     pending_upload.update({
-                        "filename": Path(uploaded_file.name).name,
-                        "file_bytes": await uploaded_file.read(),
-                        "content_type": uploaded_file.content_type or "video/mp4",
+                        "filename": filename,
+                        "file_bytes": file_bytes,
+                        "content_type": content_type,
                     })
                     ui.notify(
-                        "Enter Target Dialogue, then click Run Detection.",
-                        type="warning",
+                        "Video ready. Enter Target Dialogue and click Run Detection.",
+                        type="info",
                         position="top",
                     )
                     return
-                await submit_uploaded_job(event, text)
+
+                await submit_uploaded_bytes(filename, file_bytes, content_type, text)
                 refresh_ui()
 
-            def handle_rejected() -> None:
+            def handle_rejected():
                 ui.notify(
-                    "File rejected — check the file is a valid video format and under 250 MB.",
+                    "File rejected — ensure it is a valid video under 250 MB.",
                     type="negative",
                     position="top",
                 )
 
-            video_upload = ui.upload(
+            ui.upload(
                 on_upload=handle_upload,
                 on_rejected=handle_rejected,
                 auto_upload=True,
-            ).props(
-                'accept="video/*" max-file-size="262144000"'
-            ).classes("w-full mt-2")
+            ).props('accept="video/*" max-file-size="262144000"').classes("w-full mt-2")
+
             run_btn = (
-                ui.button("ðŸ”  Run Detection")
-                .classes(
-                    "w-full mt-6 py-3 rounded-xl text-base font-semibold"
-                    " text-white"
-                )
-                .style(
-                    "background: linear-gradient(135deg,#6366f1,#8b5cf6);"
-                    "transition: opacity .2s;"
-                )
+                ui.button("Run Detection")
+                .classes("w-full mt-6 py-3 rounded-xl text-base font-semibold text-white")
+                .style("background: linear-gradient(135deg,#6366f1,#8b5cf6); transition: opacity .2s;")
                 .props("unelevated")
             )
-        # â”€â”€ STATUS + RESULT AREA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        status_card   = ui.card().classes(
-            "w-full max-w-2xl rounded-2xl p-6 mt-4"
-            " border border-gray-800"
+
+        status_card = ui.card().classes(
+            "w-full max-w-2xl rounded-2xl p-6 mt-4 border border-gray-800"
         ).style("background:#161b27; display:none")
-        result_card   = ui.card().classes(
-            "w-full max-w-2xl rounded-2xl p-8 mt-4"
-            " border border-gray-800"
+
+        result_card = ui.card().classes(
+            "w-full max-w-2xl rounded-2xl p-8 mt-4 border border-gray-800"
         ).style("background:#161b27; display:none")
-        # â”€â”€ STATUS CARD CONTENTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
         with status_card:
             with ui.row().classes("w-full items-center gap-3"):
-                status_dot   = ui.element("div").classes(
+                status_dot = ui.element("div").classes(
                     "w-2.5 h-2.5 rounded-full bg-yellow-400"
                 ).style("flex-shrink:0")
-                status_label = ui.label("Processingâ€¦").classes(
+                status_label = ui.label("Processing...").classes(
                     "text-sm font-semibold text-gray-200"
                 )
                 ui.space()
-                job_id_label = ui.label("").classes(
-                    "text-xs text-gray-600 font-mono"
-                )
-            error_label = ui.label("").classes(
-                "text-sm text-red-400 mt-3 break-all"
-            )
-        # â”€â”€ RESULT CARD CONTENTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                job_id_label = ui.label("").classes("text-xs text-gray-600 font-mono")
+            error_label = ui.label("").classes("text-sm text-red-400 mt-3 break-all")
+
         with result_card:
             result_inner = ui.column().classes("w-full gap-5")
-        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        # REFRESH UI
-        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        def refresh_ui() -> None:
+
+        def refresh_ui():
             s = state["status"]
-            # â”€â”€ show/hide cards â”€â”€
             status_card.style(
-                "background:#161b27;" +
-                ("display:block" if s else "display:none")
+                "background:#161b27;" + ("display:block" if s else "display:none")
             )
-            # â”€â”€ status dot colour â”€â”€
             if s in ("completed", "success", "done"):
                 status_dot.classes("bg-emerald-400", remove="bg-yellow-400 bg-red-400")
                 status_label.text = "Completed"
@@ -275,62 +242,46 @@ def dashboard() -> None:
             else:
                 status_dot.classes("bg-yellow-400 animate-pulse",
                                    remove="bg-emerald-400 bg-red-400")
-                status_label.text = "Processingâ€¦"
+                status_label.text = "Processing..."
                 status_label.classes("text-gray-200", remove="text-emerald-300 text-red-300")
-            job_id_label.text  = state["job_id"] or ""
-            error_label.text   = state["error"]  or ""
-            # â”€â”€ result â”€â”€
+
+            job_id_label.text = state["job_id"] or ""
+            error_label.text  = state["error"]  or ""
             result_inner.clear()
+
             if s == "completed":
                 result_card.style("background:#161b27; display:block")
-                score_raw = state["confidence_score"] or 0.0
-                score     = float(score_raw)
+                score = float(state["confidence_score"] or 0.0)
                 tier_code, tier_name = _tier_badge(state["tier_executed"])
                 with result_inner:
-                    # header row
                     with ui.row().classes("w-full items-center justify-between"):
                         ui.label("Detection Result").classes(
                             "text-lg font-semibold text-gray-200"
                         )
-                        ui.badge(f"âœ”  {tier_code} Â· {tier_name}").classes(
+                        ui.badge(f"OK  {tier_code} - {tier_name}").classes(
                             "bg-indigo-600 text-white text-xs px-3 py-1 rounded-full"
                         )
-                    # stats row
                     with ui.row().classes(
                         "w-full justify-around mt-2 py-4 rounded-xl"
                     ).style("background:#0f1117"):
-                        _stat_card(
-                            "Timestamp",
-                            state["formatted_timestamp"] or "â€”",
-                            "text-yellow-300",
-                        )
+                        _stat_card("Timestamp", state["formatted_timestamp"] or "-", "text-yellow-300")
                         _stat_card(
                             "Frame",
-                            f"#{state['frame_number']}" if state["frame_number"] is not None else "â€”",
+                            f"#{state['frame_number']}" if state["frame_number"] is not None else "-",
                             "text-blue-300",
                         )
-                        _stat_card(
-                            "Confidence",
-                            f"{score * 100:.1f}%",
-                            _confidence_color(score),
-                        )
-                        _stat_card(
-                            "Tier",
-                            tier_code,
-                            "text-purple-300",
-                        )
-                    # detected text
+                        _stat_card("Confidence", f"{score * 100:.1f}%", _confidence_color(score))
+                        _stat_card("Tier", tier_code, "text-purple-300")
+
                     if state["extracted_text"]:
-                        with ui.column().classes(
-                            "w-full rounded-xl p-4"
-                        ).style("background:#0f1117"):
+                        with ui.column().classes("w-full rounded-xl p-4").style("background:#0f1117"):
                             ui.label("Detected Text").classes(
                                 "text-xs text-gray-500 uppercase tracking-widest mb-1"
                             )
                             ui.label(f'"{state["extracted_text"]}"').classes(
                                 "text-gray-200 text-sm italic"
                             )
-                    # frame image
+
                     if state["has_frame"]:
                         with ui.column().classes("w-full rounded-xl overflow-hidden mt-1"):
                             ui.label("Extracted Frame").classes(
@@ -338,78 +289,62 @@ def dashboard() -> None:
                             )
                             ui.image(
                                 f"{BACKEND_URL}/api/v1/jobs/{state['job_id']}/frame"
-                            ).classes("w-full rounded-xl").style(
-                                "border:1px solid #374151"
-                            )
+                            ).classes("w-full rounded-xl").style("border:1px solid #374151")
+
             elif s == "failed":
                 result_card.style("background:#161b27; display:block")
                 with result_inner:
-                    with ui.column().classes(
-                        "w-full items-center py-8 gap-3"
-                    ):
-                        ui.label("âœ•").classes("text-5xl text-red-500")
-                        ui.label("Detection Failed").classes(
-                            "text-lg font-semibold text-red-400"
-                        )
+                    with ui.column().classes("w-full items-center py-8 gap-3"):
+                        ui.label("Detection Failed").classes("text-lg font-semibold text-red-400")
                         if state["error"]:
                             ui.label(state["error"]).classes(
                                 "text-xs text-gray-500 text-center max-w-sm break-all"
                             )
             else:
                 result_card.style("background:#161b27; display:none")
-        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        # BUTTON CLICK
-        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        async def run_detection() -> None:
+
+        async def run_detection():
             url  = video_url.value.strip()
             text = dialogue_text.value.strip()
+
             if not text:
-                ui.notify(
-                    "Please enter Target Dialogue.",
-                    type="warning",
-                    position="top",
-                )
+                ui.notify("Please enter a Target Dialogue.", type="warning", position="top")
                 return
-            if not url and not state["job_id"]:
-                ui.notify(
-                    "Please enter a Video URL or upload a video.",
-                    type="warning",
-                    position="top",
-                )
-                return
-            if not url and state["job_id"]:
-                refresh_ui()
-                return
+
             if not url and pending_upload:
                 run_btn.props("loading")
                 upload = pending_upload.copy()
                 pending_upload.clear()
                 await submit_uploaded_bytes(
-                    upload["filename"],
-                    upload["file_bytes"],
-                    upload["content_type"],
-                    text,
+                    upload["filename"], upload["file_bytes"], upload["content_type"], text,
                 )
                 run_btn.props(remove="loading")
                 refresh_ui()
                 return
+
+            if not url:
+                ui.notify(
+                    "Please enter a Video URL or upload a video file.",
+                    type="warning", position="top",
+                )
+                return
+
             run_btn.props("loading")
             await submit_job(url, text)
             run_btn.props(remove="loading")
             refresh_ui()
+
         run_btn.on_click(run_detection)
-        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        # POLL TIMER
-        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        async def update_loop() -> None:
+
+        async def update_loop():
             await poll_job_status()
             refresh_ui()
+
         ui.timer(POLL_INTERVAL_SECONDS, update_loop)
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# ENTRY POINT
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+
 ui.run(
-    title="Quest1 Â· Dialogue Detection",
+    title="Quest1 - Dialogue Detection",
     port=8080,
     reload=False,
     dark=True,
