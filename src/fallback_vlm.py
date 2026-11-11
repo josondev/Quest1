@@ -162,7 +162,11 @@ class VLMArbiterService:
                     temperature=0.0,
                 )
             except Exception as exc:
-                raise VLMError(f"VLM decision processing failed: {exc}") from exc
+                raise VLMError(
+                    "VLM decision processing failed: "
+                    f"{exc}. Check NVIDIA_VLM_MODEL={self.model!r} "
+                    f"and NVIDIA_BASE_URL={self.base_url!r}."
+                ) from exc
 
             # Parse this candidate's response
             try:
