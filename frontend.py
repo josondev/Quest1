@@ -86,16 +86,16 @@ async def submit_uploaded_bytes(
         state["error"] = str(exc)
 
 async def submit_uploaded_job(event: UploadEventArguments, target_text: str) -> None:
-    filename = Path(event.name).name  # event.name not event.file.name
+    uploaded_file = event.file
+    filename = Path(uploaded_file.name).name
     try:
-        # event.content holds the raw bytes — no .save() needed
-        file_bytes = event.content.read()
+        file_bytes = await uploaded_file.read()
         if not file_bytes:
             state["status"] = "failed"
             state["error"] = "Uploaded file is empty."
             return
 
-        content_type = getattr(event, "type", "video/mp4")
+        content_type = uploaded_file.content_type or "video/mp4"
         await submit_uploaded_bytes(filename, file_bytes, content_type, target_text)
     except Exception as exc:
         state["status"] = "failed"
@@ -197,10 +197,11 @@ def dashboard() -> None:
             async def handle_upload(event: UploadEventArguments) -> None:
                 text = dialogue_text.value.strip()
                 if not text:
+                    uploaded_file = event.file
                     pending_upload.update({
-                        "filename": Path(event.name).name,
-                        "file_bytes": event.content.read(),
-                        "content_type": getattr(event, "type", "video/mp4"),
+                        "filename": Path(uploaded_file.name).name,
+                        "file_bytes": await uploaded_file.read(),
+                        "content_type": uploaded_file.content_type or "video/mp4",
                     })
                     ui.notify(
                         "Enter Target Dialogue, then click Run Detection.",
