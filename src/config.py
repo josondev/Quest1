@@ -55,7 +55,7 @@ class Settings(BaseSettings):
         description="NVIDIA NIM API Key from build.nvidia.com"
     )
     nvidia_vlm_model: str = Field(
-        default="meta/llama-3.2-11b-vision-instruct",
+        default="meta/llama-4-scout-17b-16e-instruct",
         description="NVIDIA NIM VLM model identifier"
     )
     nvidia_base_url: str = Field(
