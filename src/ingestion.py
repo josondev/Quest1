@@ -12,6 +12,11 @@ from urllib.parse import urlparse
 
 import cv2
 import yt_dlp
+try:
+    from youtube_transcript_api import YouTubeTranscriptApi as _YTTranscriptApi
+    _YT_TRANSCRIPT_AVAILABLE = True
+except ImportError:
+    _YT_TRANSCRIPT_AVAILABLE = False
 
 from src.config import settings
 from src.models.schemas import SubtitleMatchResult, VideoMetadata
@@ -93,6 +98,62 @@ class StreamIngestionService:
         return float(ts_str)
 
     parse_vtt_timestamp = _parse_vtt_timestamp
+
+    @staticmethod
+    def _extract_youtube_video_id(url: str) -> Optional[str]:
+        """Extract YouTube video ID from any YouTube URL format."""
+        for pattern in [r"(?:v=|youtu\.be/|embed/|shorts/)([A-Za-z0-9_-]{11})"]:
+            m = re.search(pattern, url)
+            if m:
+                return m.group(1)
+        return None
+
+    def _probe_youtube_no_cookies(self, url: str) -> "Optional[VideoMetadata]":
+        """
+        Fetch YouTube transcript without cookies using youtube-transcript-api.
+        Returns VideoMetadata on success, None on any failure (falls back to yt-dlp).
+        """
+        if not _YT_TRANSCRIPT_AVAILABLE:
+            return None
+        video_id = self._extract_youtube_video_id(url)
+        if not video_id:
+            return None
+        duration = 0.0
+        has_subtitles = False
+        subtitle_cues: List[SubtitleCue] = []
+        try:
+            api = _YTTranscriptApi()
+            fetched = api.fetch(video_id)
+            for snippet in fetched:
+                start = float(snippet.start)
+                dur   = float(snippet.duration)
+                text  = str(snippet.text).strip()
+                if text:
+                    subtitle_cues.append(SubtitleCue(
+                        start_seconds=start,
+                        end_seconds=start + dur,
+                        text=text,
+                    ))
+            if subtitle_cues:
+                has_subtitles = True
+                duration = subtitle_cues[-1].end_seconds
+            logger.info("youtube-transcript-api: %d cues for %s", len(subtitle_cues), video_id)
+        except Exception as exc:
+            logger.warning(
+                "Transcript fetch failed for %s (%s) ? falling back to yt-dlp",
+                video_id, exc,
+            )
+            return None
+        self._yt_transcript_cache = {video_id: subtitle_cues}
+        return VideoMetadata(
+            url=url,
+            duration_seconds=duration,
+            fps=25.0,
+            total_frames=int(duration * 25.0),
+            has_subtitles=has_subtitles,
+            is_local=False,
+            stream_path=url,
+        )
 
     def _get_cookies_path(self) -> Optional[str]:
         """
@@ -212,10 +273,15 @@ class StreamIngestionService:
         # ONLINE VIDEO
         # ==========================
 
-        cookies_path = self._get_cookies_path()
-        
-        # Check if this is a YouTube URL to apply special handling
+        # YouTube: try cookie-free transcript path first (no bot detection)
         is_youtube = "youtube.com" in url_or_path or "youtu.be" in url_or_path
+        if is_youtube:
+            yt_meta = self._probe_youtube_no_cookies(url_or_path)
+            if yt_meta is not None:
+                logger.info("YouTube metadata fetched without cookies for %s", url_or_path)
+                return yt_meta
+
+        cookies_path = self._get_cookies_path()
         
         ydl_opts = {
             "quiet": True,
@@ -661,6 +727,18 @@ class StreamIngestionService:
         is_auto_generated: bool = False,
         **kwargs,
     ) -> Optional[SubtitleMatchResult]:
+        # Use cached transcript from youtube-transcript-api if available
+        _vid = self._extract_youtube_video_id(target_url)
+        if _vid and hasattr(self, "_yt_transcript_cache"):
+            _cached = self._yt_transcript_cache.get(_vid)
+            if _cached:
+                logger.info("Using cached transcript for subtitle match (%d cues)", len(_cached))
+                return self._match_phrase_in_cues(
+                    target_phrase=target_phrase,
+                    cues=_cached,
+                    similarity_threshold=similarity_threshold / 100.0,
+                )
+
         with tempfile.TemporaryDirectory(prefix="sub_probe_") as tmp_dir:
             res = self._download_subtitle_file(target_url, target_dir=Path(tmp_dir), **kwargs)
             vtt_path, detected_is_auto, detected_lang = res if isinstance(res, tuple) else (None, is_auto_generated, track_language)
