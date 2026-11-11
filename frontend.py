@@ -19,106 +19,6 @@ TIER_LABELS = {
     "Tier 4: VLM Arbiter Fallback":      ("T4", "Vision AI"),
 }
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# STATE
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-state: dict = {
-    "job_id": None,
-    "status": None,
-    "target_dialogue": None,
-    "formatted_timestamp": None,
-    "timestamp_seconds": None,
-    "frame_number": None,
-    "confidence_score": None,
-    "tier_executed": None,
-    "extracted_text": None,
-    "url": None,
-    "error": None,
-    "has_frame": False,
-}
-def _reset_state(url: str, target_text: str) -> None:
-    state.update({
-        "job_id": None, "status": "processing",
-        "target_dialogue": target_text, "formatted_timestamp": None,
-        "timestamp_seconds": None, "frame_number": None,
-        "confidence_score": None, "tier_executed": None,
-        "extracted_text": None, "url": url, "error": None, "has_frame": False,
-    })
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# API
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-async def submit_job(url: str, target_text: str) -> None:
-    _reset_state(url, target_text)
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.post(
-                f"{BACKEND_URL}/api/v1/jobs",
-                json={"url": url, "target_text": target_text},
-            )
-            r.raise_for_status()
-            data = r.json()
-            state["job_id"] = data.get("job_id")
-            state["status"]  = data.get("status")
-    except Exception as exc:
-        state["status"] = "failed"
-        state["error"]  = str(exc)
-
-async def submit_uploaded_bytes(
-    filename: str,
-    file_bytes: bytes,
-    content_type: str,
-    target_text: str,
-) -> None:
-    _reset_state(filename, target_text)
-    try:
-        timeout = httpx.Timeout(300.0)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(
-                f"{BACKEND_URL}/api/v1/jobs/upload",
-                data={"target_text": target_text},
-                files={"file": (filename, file_bytes, content_type)},
-            )
-            response.raise_for_status()
-        data = response.json()
-        state["job_id"] = data.get("job_id")
-        state["status"] = data.get("status")
-    except Exception as exc:
-        state["status"] = "failed"
-        state["error"] = str(exc)
-
-async def submit_uploaded_job(event: UploadEventArguments, target_text: str) -> None:
-    uploaded_file = event.file
-    filename = Path(uploaded_file.name).name
-    try:
-        file_bytes = await uploaded_file.read()
-        if not file_bytes:
-            state["status"] = "failed"
-            state["error"] = "Uploaded file is empty."
-            return
-
-        content_type = uploaded_file.content_type or "video/mp4"
-        await submit_uploaded_bytes(filename, file_bytes, content_type, target_text)
-    except Exception as exc:
-        state["status"] = "failed"
-        state["error"] = str(exc)
-async def poll_job_status() -> None:
-    if not state["job_id"] or state["status"] in TERMINAL_STATUSES:
-        return
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(f"{BACKEND_URL}/api/v1/jobs/{state['job_id']}")
-            data = r.json()
-            state["status"]              = data.get("status")
-            state["formatted_timestamp"] = data.get("formatted_timestamp")
-            state["timestamp_seconds"]   = data.get("timestamp_seconds")
-            state["frame_number"]        = data.get("frame_number")
-            state["confidence_score"]    = data.get("confidence_score")
-            state["tier_executed"]       = data.get("tier_executed")
-            state["extracted_text"]      = data.get("extracted_text")
-            state["error"]               = data.get("error_message")
-            state["has_frame"]           = bool(data.get("frame_image_path"))
-    except Exception as exc:
-        state["error"] = str(exc)
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # HELPERS
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def _tier_badge(tier_raw: str | None) -> tuple[str, str]:
@@ -140,6 +40,93 @@ def _stat_card(label: str, value: str, color: str = "text-white") -> None:
 @ui.page("/")
 def dashboard() -> None:
     ui.page_title("Quest1 Â· Dialogue Detection")
+    # ── per-session state (each browser tab gets its own) ──
+    state: dict = {
+        "job_id": None, "status": None, "target_dialogue": None,
+        "formatted_timestamp": None, "timestamp_seconds": None,
+        "frame_number": None, "confidence_score": None,
+        "tier_executed": None, "extracted_text": None,
+        "url": None, "error": None, "has_frame": False,
+    }
+
+    def _reset_state(url: str, target_text: str) -> None:
+        state.update({
+            "job_id": None, "status": "processing",
+            "target_dialogue": target_text, "formatted_timestamp": None,
+            "timestamp_seconds": None, "frame_number": None,
+            "confidence_score": None, "tier_executed": None,
+            "extracted_text": None, "url": url, "error": None, "has_frame": False,
+        })
+
+    async def submit_job(url: str, target_text: str) -> None:
+        _reset_state(url, target_text)
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                r = await client.post(
+                    f"{BACKEND_URL}/api/v1/jobs",
+                    json={"url": url, "target_text": target_text},
+                )
+                r.raise_for_status()
+                data = r.json()
+                state["job_id"] = data.get("job_id")
+                state["status"] = data.get("status")
+        except Exception as exc:
+            state["status"] = "failed"
+            state["error"] = str(exc)
+
+    async def submit_uploaded_bytes(
+        filename: str, file_bytes: bytes, content_type: str, target_text: str,
+    ) -> None:
+        _reset_state(filename, target_text)
+        try:
+            timeout = httpx.Timeout(300.0)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(
+                    f"{BACKEND_URL}/api/v1/jobs/upload",
+                    data={"target_text": target_text},
+                    files={"file": (filename, file_bytes, content_type)},
+                )
+                response.raise_for_status()
+            data = response.json()
+            state["job_id"] = data.get("job_id")
+            state["status"] = data.get("status")
+        except Exception as exc:
+            state["status"] = "failed"
+            state["error"] = str(exc)
+
+    async def submit_uploaded_job(event: UploadEventArguments, target_text: str) -> None:
+        uploaded_file = event.file
+        filename = Path(uploaded_file.name).name
+        try:
+            file_bytes = await uploaded_file.read()
+            if not file_bytes:
+                state["status"] = "failed"
+                state["error"] = "Uploaded file is empty."
+                return
+            content_type = uploaded_file.content_type or "video/mp4"
+            await submit_uploaded_bytes(filename, file_bytes, content_type, target_text)
+        except Exception as exc:
+            state["status"] = "failed"
+            state["error"] = str(exc)
+
+    async def poll_job_status() -> None:
+        if not state["job_id"] or state["status"] in TERMINAL_STATUSES:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(f"{BACKEND_URL}/api/v1/jobs/{state['job_id']}")
+                data = r.json()
+                state["status"]              = data.get("status")
+                state["formatted_timestamp"] = data.get("formatted_timestamp")
+                state["timestamp_seconds"]   = data.get("timestamp_seconds")
+                state["frame_number"]        = data.get("frame_number")
+                state["confidence_score"]    = data.get("confidence_score")
+                state["tier_executed"]       = data.get("tier_executed")
+                state["extracted_text"]      = data.get("extracted_text")
+                state["error"]               = data.get("error_message")
+                state["has_frame"]           = bool(data.get("frame_image_path"))
+        except Exception as exc:
+            state["error"] = str(exc)
     # â”€â”€ global dark background â”€â”€
     ui.add_head_html("""
     <style>

@@ -15,7 +15,7 @@ huggingface-hub>=0.22.0
 
 # Stream Ingestion & Metadata Probing
 # [default] includes yt-dlp-ejs (required for YouTube JS challenge solving)
-yt-dlp[default]>=2025.1.1
+yt-dlp[default]==2026.8.19
 
 # Image & Frame Processing
 opencv-python-headless>=4.9.0.80
@@ -28,7 +28,7 @@ azure-storage-blob==12.20.0
 
 # Fuzzy String Alignment
 rapidfuzz>=3.6.0
-nicegui
+nicegui==3.16.0
 
 # Subtitle Parsing (Tier 0)
 webvtt-py>=0.5.1

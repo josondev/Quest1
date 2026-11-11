@@ -114,9 +114,15 @@ class JobStore:
             try:
                 entity = _result_to_entity(result)
                 self._client.upsert_entity(entity)
+                # Also keep local copy for fast in-process reads
+                self._local[job_id] = result
                 return
             except Exception as exc:
-                logger.warning("JobStore.put Azure failed (%s) â€” using local", exc)
+                logger.error(
+                    "JobStore.put Azure FAILED for job %s (%s) — "
+                    "falling back to in-memory. Job data will be LOST on container restart.",
+                    job_id, exc,
+                )
         self._local[job_id] = result
 
     def get(self, job_id: str) -> Optional[DetectionResult]:
@@ -225,8 +231,10 @@ class ArtifactStore:
                 logger.info("ArtifactStore: uploaded %s â†’ %s", local_path.name, url)
                 return url
             except Exception as exc:
-                logger.warning(
-                    "ArtifactStore.upload_frame Azure failed (%s) â€” using local path", exc
+                logger.error(
+                    "ArtifactStore.upload_frame Azure FAILED for job %s (%s) — "
+                    "frame will only exist on ephemeral container disk and will be LOST on restart.",
+                    job_id, exc,
                 )
 
         return str(local_path)

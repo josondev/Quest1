@@ -1,4 +1,4 @@
-import uuid
+﻿import uuid
 import logging
 from pathlib import Path
 
@@ -110,10 +110,32 @@ def _execute_pipeline_background(
 
     try:
 
-        result = orchestrator.run(
-            job_id,
-            request,
-        )
+        import signal as _signal
+
+        def _timeout_handler(signum, frame):
+            raise TimeoutError(f"Pipeline exceeded maximum execution time for job {job_id}")
+
+        # Set a 30-minute hard timeout (Azure Container Apps kills after 240min anyway)
+        # Only works on Unix (Linux containers) -- no-op on Windows dev
+        _prev = None
+        try:
+            _prev = _signal.signal(_signal.SIGALRM, _timeout_handler)
+            _signal.alarm(1800)  # 30 minutes
+        except (AttributeError, OSError):
+            pass  # Windows: SIGALRM not available
+
+        try:
+            result = orchestrator.run(
+                job_id,
+                request,
+            )
+        finally:
+            try:
+                _signal.alarm(0)
+                if _prev is not None:
+                    _signal.signal(_signal.SIGALRM, _prev)
+            except (AttributeError, OSError):
+                pass
 
 
         # ----------------------------------------
